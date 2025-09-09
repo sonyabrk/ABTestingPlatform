@@ -1,0 +1,48 @@
+```gitignore
+# бинарные файлы
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# файлы IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# файлы конфигурации (кроме примеров)
+config/config.yaml
+!config/config.yaml.example
+
+# логи
+*.log
+
+# кэш Go
+/.go/
+
+# временные файлы
+tmp/
+temp/
+
+# файлы базы данных
+*.db
+*.sqlite
+
+# файлы зависимостей
+vendor/
+
+# файлы сборки
+/build/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# бинарные файлы приложения
+/ab-testing-app
+/ab-testing-platform
