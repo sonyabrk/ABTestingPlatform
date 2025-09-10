@@ -35,7 +35,7 @@ func (r *Repository) CreateSchema(ctx context.Context) error {
 
 		CREATE TABLE IF NOT EXISTS users (
 			id SERIAL PRIMARY KEY,
-			experement_id INTEGER REFERENCES experiments(id) ON DELETE CASCADE,
+			experiment_id INTEGER REFERENCES experiments(id) ON DELETE CASCADE,
 			user_id VARCHAR(255) NOT NULL,
 			group_name VARCHAR(10) NOT NULL CHECK (group_name IN ('A', 'B')),
 			UNIQUE(experiment_id, user_id)
