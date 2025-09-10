@@ -3,7 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
-	"log"
+	"testing-platform/pkg/logger"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,6 +20,7 @@ func NewReposit(pool *pgxpool.Pool) *Repository {
 
 // метод для создания структуры БД
 func (r *Repository) CreateSchema(ctx context.Context) error {
+	logger.Info("Выполнение DDL: создание схемы БД")
 	sql := `
 		CREATE TYPE algorithm_type AS ENUM ('collaborative', 'content_based', 'hybrid', 'popularity_based');
         
@@ -54,9 +55,9 @@ func (r *Repository) CreateSchema(ctx context.Context) error {
 	// выполнение sql-запроса
 	_, err := r.pool.Exec(ctx, sql)
 	if err != nil {
-		log.Printf("Ошибка при создании схемы БД : %v", err) // лог ошибки для диагностики
+		logger.Error("Ошибка при создании схемы БД: %v", err) // лог ошибки для диагностики
 		return fmt.Errorf("не удалось создать структуру базы данных : %w", err)
 	}
-	log.Println("Схема БД успешно создана") //лог успешного выполнения
+	logger.Info("Схема БД успешно создана") //лог успешного выполнения
 	return nil
 }
