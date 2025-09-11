@@ -206,7 +206,7 @@ func (r *Repository) UpdateExperimentStatus(ctx context.Context, experimentID in
 
 // возвращение статистики по эксперименту
 // считает статистику по группам пользователей: количество рекомендаций, кликов, средний рейтинг и CTR (метрика кликабельности)
-func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (map[string]interface{}, error) {
+func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (map[string]any, error) {
 	logger.Info("Запрос статистики для эксперимента %d", experimentID)
 
 	sql := `

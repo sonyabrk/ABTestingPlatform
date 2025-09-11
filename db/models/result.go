@@ -25,23 +25,26 @@ func (r *Result) Validate() error {
 	if r.ID < 0 {
 		return errors.New("айди не может быть отрицательным")
 	}
-	if r.UserId < 0 {
-		return errors.New("айди пользователя не может быть отрицательным")
+	if r.UserId <= 0 {
+		return errors.New("айди пользователя не может быть не положительным")
 	}
 	if r.RecommendationId == "" {
-		return errors.New("рекомендуемый алгоритм должен существовать")
+		return errors.New("ID не может быть пустым")
 	}
 	if len(r.RecommendationId) > 255 {
 		return errors.New("айди рекомедуемого эксперимента слишком длинное")
 	}
-	if r.ClickedAt != nil && r.Clicked == false {
-		return errors.New("не может быть времени без клика")
+	if r.Rating > 5 || r.Rating < 0 {
+		return errors.New("рейтинг должен быть от 0 до 5")
 	}
-	if r.ClickedAt == nil && r.Clicked == true {
-		return errors.New("не может быть клика без времени")
+	if r.Rating > 0 && !r.Clicked {
+		return errors.New("нельзя поставить рейтинг без клика")
 	}
-	if r.Rating > 5 || r.Rating < 1 {
-		return errors.New("рейтинг должен быть от 1 до 5")
+	if !r.Clicked && r.ClickedAt != nil {
+		return errors.New("время клика не может быть указано без самого клика")
+	}
+	if r.Clicked && r.ClickedAt == nil {
+		return errors.New("при наличии клика должно быть указано время клика")
 	}
 	return nil
 }
@@ -66,6 +69,8 @@ func (r *Result) IsValidRating() bool {
 // разбиение рейтинга на категории
 func (r *Result) GetResultCategory() string {
 	switch r.Rating {
+	case 0:
+		return "negative"
 	case 1:
 		return "negative"
 	case 2:
@@ -83,6 +88,9 @@ func (r *Result) GetResultCategory() string {
 
 // проверка клика за последние 24 часа
 func (r *Result) WasClickedRecently() bool {
+	if r.ClickedAt == nil {
+		return false
+	}
 	twentyFourHoursAgo := time.Now().Add(-24 * time.Hour)
 	return r.ClickedAt.After(twentyFourHoursAgo)
 }
