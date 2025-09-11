@@ -2,6 +2,7 @@ package models
 
 import (
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -44,19 +45,24 @@ func (e *Experiment) Validate() error {
 	return nil
 }
 
-// методы (геттеры) ниже добавлены для инкапсуляции и предотвращения дублирования кода
+// методы для инкапсулиции логики проверки
 
-// IsRunning проверяет, активен ли эксперимент
+// проверка, активен ли эксперимент
 func (e *Experiment) IsRunning() bool {
 	return e.IsActive
 }
 
-// GetAlgorithmNames возвращает названия алгоритмов для отображения
+// возвращение названия алгоритмов для отображения
 func (e *Experiment) GetAlgorithmNames() (string, string) {
 	return e.AlgorithmA, e.AlgorithmB
 }
 
-// CanAcceptMoreUsers проверяет, можно ли добавлять пользователей в эксперимент
+// проверка, можно ли добавлять пользователей в эксперимент
 func (e *Experiment) CanAcceptMoreUsers(currentCount int) bool {
 	return e.IsRunning() && currentCount < e.UserPercent*1000
+}
+
+// проверка уникальности имени эксперимента
+func (e *Experiment) CheckNameUniqueness(existingNames []string) bool {
+	return !slices.Contains(existingNames, e.Name)
 }

@@ -7,7 +7,7 @@ import (
 
 type Result struct {
 	ID               int        `db:"id" json:"id"`
-	UserId           int        `db:"user_id" json:"userId"`
+	UserId           int        `db:"user_id" json:"user_id"`
 	RecommendationId string     `db:"recommendation_id" json:"recommendation_id"`
 	Clicked          bool       `db:"clicked" json:"clicked"`
 	ClickedAt        *time.Time `db:"clicked_at" json:"clicked_at"`
