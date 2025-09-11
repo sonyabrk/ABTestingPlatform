@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing-platform/db/models"
 	"testing-platform/pkg/logger"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -14,9 +16,20 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
-// конструктор
-func NewReposit(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
+// конструктор с проверкой подключения
+func NewReposit(pool *pgxpool.Pool) (*Repository, error) {
+	if pool == nil {
+		return nil, errors.New("пул подключений не может быть nil")
+	}
+	// проверка работы подключения
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := pool.Ping(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("пул подключений не активен: %w", err)
+	}
+	logger.Info("Репозиторий успешно инициализирован")
+	return &Repository{pool: pool}, nil
 }
 
 // метод для создания структуры БД
@@ -65,6 +78,9 @@ func (r *Repository) CreateSchema(ctx context.Context) error {
 
 // создание нового эксперимента
 func (r *Repository) CreateExperiment(ctx context.Context, exp *models.Experiment) error {
+	if err := exp.Validate(); err != nil {
+		return err
+	}
 	logger.Info("Выполнение DML: создание эксперимента '%s'", exp.Name)
 
 	sql := `INSERT INTO experiments (name, algorithm_a, algorithm_b, user_percent, is_active) 
@@ -83,7 +99,10 @@ func (r *Repository) CreateExperiment(ctx context.Context, exp *models.Experimen
 }
 
 // добавление пользователя в эксперимент
-func (r *Repository) AddUserToExperiment(ctx context.Context, experimentID int, userID string, groupName string) error {
+func (r *Repository) AddUserToExperiment(ctx context.Context, experimentID int, userID string, groupName string, user *models.User) error {
+	if err := user.Validate(); err != nil {
+		return err
+	}
 	logger.Info("Добавление пользователя %s в эксперимент %d (группа %s)", userID, experimentID, groupName)
 
 	sql := `INSERT INTO users (experiment_id, user_id, group_name) VALUES ($1, $2, $3)`
@@ -99,7 +118,10 @@ func (r *Repository) AddUserToExperiment(ctx context.Context, experimentID int, 
 }
 
 // добавление результата рекомендации
-func (r *Repository) AddResult(ctx context.Context, userID int, recommendationID string, clicked bool, rating int) error {
+func (r *Repository) AddResult(ctx context.Context, userID int, recommendationID string, clicked bool, rating int, res *models.Result) error {
+	if err := res.Validate(); err != nil {
+		return err
+	}
 	logger.Info("Добавление результата для пользователя %d, рекомендация %s", userID, recommendationID)
 
 	var sql string

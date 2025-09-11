@@ -6,12 +6,12 @@ import (
 )
 
 type Result struct {
-	ID               int        `db:"id" json:"id"`
-	UserId           int        `db:"user_id" json:"user_id"`
-	RecommendationId string     `db:"recommendation_id" json:"recommendation_id"`
-	Clicked          bool       `db:"clicked" json:"clicked"`
-	ClickedAt        *time.Time `db:"clicked_at" json:"clicked_at"`
-	Rating           int        `db:"rating" json:"rating"`
+	ID               int       `db:"id" json:"id"`
+	UserId           int       `db:"user_id" json:"user_id"`
+	RecommendationId string    `db:"recommendation_id" json:"recommendation_id"`
+	Clicked          bool      `db:"clicked" json:"clicked"`
+	ClickedAt        time.Time `db:"clicked_at" json:"clicked_at"`
+	Rating           int       `db:"rating" json:"rating"`
 	//User             *User      `db:"-" json:"user,omitempty"`
 }
 
@@ -40,10 +40,10 @@ func (r *Result) Validate() error {
 	if r.Rating > 0 && !r.Clicked {
 		return errors.New("нельзя поставить рейтинг без клика")
 	}
-	if !r.Clicked && r.ClickedAt != nil {
+	if !r.Clicked && r.ClickedAt.IsZero() {
 		return errors.New("время клика не может быть указано без самого клика")
 	}
-	if r.Clicked && r.ClickedAt == nil {
+	if r.Clicked && r.ClickedAt.IsZero() {
 		return errors.New("при наличии клика должно быть указано время клика")
 	}
 	return nil
@@ -52,8 +52,8 @@ func (r *Result) Validate() error {
 // методы для инкапсулиции логики проверки
 
 // возвращение оценки алгоритма
-func (r *Result) HasRating() int {
-	return r.Rating
+func (r *Result) HasRating() bool {
+	return r.Rating > 0
 }
 
 // проверка на положительную оценку рейтинга
@@ -88,9 +88,8 @@ func (r *Result) GetResultCategory() string {
 
 // проверка клика за последние 24 часа
 func (r *Result) WasClickedRecently() bool {
-	if r.ClickedAt == nil {
+	if r.ClickedAt.IsZero() {
 		return false
 	}
-	twentyFourHoursAgo := time.Now().Add(-24 * time.Hour)
-	return r.ClickedAt.After(twentyFourHoursAgo)
+	return time.Since(r.ClickedAt) <= 24*time.Hour
 }
