@@ -31,7 +31,7 @@ func Connect(cfg Config) (*pgxpool.Pool, error) {
 	}
 
 	// настройка пула подключений
-	poolConfig.MaxConns = 10                   // мин. кол-во подключений
+	poolConfig.MaxConns = 10                   // макс. кол-во подключений
 	poolConfig.MinConns = 2                    // мин. кол-во подключений
 	poolConfig.MaxConnLifetime = time.Hour     // макс. время жизни подключения
 	poolConfig.HealthCheckPeriod = time.Minute // период проверки здоровья подключений
@@ -57,7 +57,7 @@ func Connect(cfg Config) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// закрытие пела подключений к бд
+// закрытие пула подключений к бд
 func Close(pool *pgxpool.Pool) {
 	if pool != nil {
 		pool.Close()

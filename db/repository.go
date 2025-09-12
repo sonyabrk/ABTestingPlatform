@@ -81,17 +81,27 @@ func (r *Repository) CreateExperiment(ctx context.Context, exp *models.Experimen
 	if err := exp.Validate(); err != nil {
 		return err
 	}
+	// начало транзакции только для операций с бд
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
 	logger.Info("Выполнение DML: создание эксперимента '%s'", exp.Name)
 
 	sql := `INSERT INTO experiments (name, algorithm_a, algorithm_b, user_percent, is_active) 
 	         VALUES ($1, $2, $3, $4, $5) RETURNING id, start_date`
 
-	err := r.pool.QueryRow(ctx, sql, exp.Name, exp.AlgorithmA, exp.AlgorithmB, exp.UserPercent, exp.IsActive).
-		Scan(&exp.ID, &exp.StartDate)
+	err = tx.QueryRow(ctx, sql, exp.Name, exp.AlgorithmA, exp.AlgorithmB, exp.UserPercent, exp.IsActive).Scan(&exp.ID, &exp.StartDate)
 
 	if err != nil {
 		logger.Error("Ошибка при создании эксперимента: %v", err)
 		return fmt.Errorf("не удалось создать эксперимент: %w", err)
+	}
+	// если все успешно, то деламе коммит транзакции
+	if err := tx.Commit(ctx); err != nil {
+		return err
 	}
 
 	logger.Info("Эксперимент '%s' успешно создан с ID %d", exp.Name, exp.ID)
@@ -99,47 +109,66 @@ func (r *Repository) CreateExperiment(ctx context.Context, exp *models.Experimen
 }
 
 // добавление пользователя в эксперимент
-func (r *Repository) AddUserToExperiment(ctx context.Context, experimentID int, userID string, groupName string, user *models.User) error {
+func (r *Repository) AddUserToExperiment(ctx context.Context, user *models.User) error {
 	if err := user.Validate(); err != nil {
 		return err
 	}
-	logger.Info("Добавление пользователя %s в эксперимент %d (группа %s)", userID, experimentID, groupName)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 
+	logger.Info("Добавление пользователя %s в эксперимент %d (группа %s)", user.UserId, user.ExperimentId, user.GroupName)
 	sql := `INSERT INTO users (experiment_id, user_id, group_name) VALUES ($1, $2, $3)`
 
-	_, err := r.pool.Exec(ctx, sql, experimentID, userID, groupName)
+	_, err = tx.Exec(ctx, sql, user.ExperimentId, user.UserId, user.GroupName)
 	if err != nil {
 		logger.Error("Ошибка при добавлении пользователя в эксперимент: %v", err)
 		return fmt.Errorf("не удалось добавить пользователя в эксперимент: %w", err)
 	}
 
-	logger.Info("Пользователь %s успешно добавлен в эксперимент %d", userID, experimentID)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	logger.Info("Пользователь %s успешно добавлен в эксперимент %d", user.UserId, user.ExperimentId)
 	return nil
 }
 
 // добавление результата рекомендации
-func (r *Repository) AddResult(ctx context.Context, userID int, recommendationID string, clicked bool, rating int, res *models.Result) error {
+func (r *Repository) AddResult(ctx context.Context, res *models.Result) error {
 	if err := res.Validate(); err != nil {
 		return err
 	}
-	logger.Info("Добавление результата для пользователя %d, рекомендация %s", userID, recommendationID)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	logger.Info("Добавление результата для пользователя %d, рекомендация %s", res.UserId, res.RecommendationId)
 
 	var sql string
-	if clicked {
+
+	if res.Clicked {
 		sql = `INSERT INTO results (user_id, recommendation_id, clicked, clicked_at, rating) 
-		       VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)`
+               VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)`
+		_, err = tx.Exec(ctx, sql, res.UserId, res.RecommendationId, res.Clicked, res.Rating)
 	} else {
 		sql = `INSERT INTO results (user_id, recommendation_id, clicked, rating) 
-		       VALUES ($1, $2, $3, $4)`
+               VALUES ($1, $2, $3, $4)`
+		_, err = tx.Exec(ctx, sql, res.UserId, res.RecommendationId, res.Clicked, res.Rating)
 	}
 
-	_, err := r.pool.Exec(ctx, sql, userID, recommendationID, clicked, rating)
 	if err != nil {
 		logger.Error("Ошибка при добавлении результата: %v", err)
 		return fmt.Errorf("не удалось добавить результат: %w", err)
 	}
 
-	logger.Info("Результат для пользователя %d успешно добавлен", userID)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	logger.Info("Результат для пользователя %d успешно добавлен", res.UserId)
 	return nil
 }
 

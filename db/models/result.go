@@ -22,6 +22,9 @@ func (Result) TableName() string {
 
 // проверка корректности данных результата
 func (r *Result) Validate() error {
+	if r.Rating < 0 || r.Rating > 5 {
+		return errors.New("рейтинг должен быть от 0 до 5")
+	}
 	if r.ID < 0 {
 		return errors.New("айди не может быть отрицательным")
 	}
@@ -33,9 +36,6 @@ func (r *Result) Validate() error {
 	}
 	if len(r.RecommendationId) > 255 {
 		return errors.New("айди рекомедуемого эксперимента слишком длинное")
-	}
-	if r.Rating > 5 || r.Rating < 0 {
-		return errors.New("рейтинг должен быть от 0 до 5")
 	}
 	if r.Rating > 0 && !r.Clicked {
 		return errors.New("нельзя поставить рейтинг без клика")

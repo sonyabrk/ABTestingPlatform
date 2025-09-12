@@ -24,6 +24,13 @@ func (Experiment) TableName() string {
 
 // проверка корректности данных эксперимента
 func (e *Experiment) Validate() error {
+	validAlgorithms := []string{"collaborative", "content_based", "hybrid", "popularity_based"}
+	if !slices.Contains(validAlgorithms, e.AlgorithmA) {
+		return errors.New("неверный тип алгоритма A")
+	}
+	if !slices.Contains(validAlgorithms, e.AlgorithmB) {
+		return errors.New("неверный тип алгоритма B")
+	}
 	if e.Name == "" {
 		return errors.New("название эксперимента не может быть пустым")
 	}

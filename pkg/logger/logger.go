@@ -147,24 +147,25 @@ func (l *Logger) rotate() error {
 	if l.file == nil {
 		return nil
 	}
-	// хакрытие текущего файла
+	// закрытие текущего файла
 	if err := l.file.Close(); err != nil {
 		return fmt.Errorf("ошибка при закрытии файла лога: %w", err)
 	}
-	for i := l.maxBackups - 1; i > 0; i-- {
-		oldPath := fmt.Sprintf("%s.%d", l.logPath, i)
-		newPath := fmt.Sprintf("%s.%d", l.logPath, i+1)
-		if _, err := os.Stat(oldPath); err == nil {
-			if i >= l.maxBackups {
-				// удаление самого старого, если превышен лимит
-				os.Remove(oldPath)
-			} else {
-				os.Rename(oldPath, newPath)
+	// проверка существования файла перед ротацией
+	if _, err := os.Stat(l.logPath); err == nil {
+		// ротация файлов
+		for i := l.maxBackups - 1; i >= 1; i-- {
+			oldPath := fmt.Sprintf("%s.%d", l.logPath, i)
+			newPath := fmt.Sprintf("%s.%d", l.logPath, i+1)
+
+			if _, err := os.Stat(oldPath); err == nil {
+				if i >= l.maxBackups {
+					os.Remove(oldPath)
+				} else {
+					os.Rename(oldPath, newPath)
+				}
 			}
 		}
-	}
-	// переименовываем текущий файл
-	if _, err := os.Stat(l.logPath); err == nil {
 		os.Rename(l.logPath, l.logPath+".1")
 	}
 	// создаем новый файл
@@ -241,18 +242,42 @@ func (l *Logger) Fatal(format string, args ...interface{}) {
 // ниже глобальные функции для удобства логирования уровней
 
 func Debug(format string, args ...interface{}) {
+	if globalLogger == nil {
+		log.Printf("[DEBUG] "+format, args...)
+		return
+	}
 	globalLogger.log(LevelDebug, 4, format, args...)
 }
+
 func Info(format string, args ...interface{}) {
+	if globalLogger == nil {
+		log.Printf("[INFO] "+format, args...)
+		return
+	}
 	globalLogger.log(LevelInfo, 4, format, args...)
 }
+
 func Warn(format string, args ...interface{}) {
+	if globalLogger == nil {
+		log.Printf("[WARN] "+format, args...)
+		return
+	}
 	globalLogger.log(LevelWarn, 4, format, args...)
 }
+
 func Error(format string, args ...interface{}) {
+	if globalLogger == nil {
+		log.Printf("[ERROR] "+format, args...)
+		return
+	}
 	globalLogger.log(LevelError, 4, format, args...)
 }
+
 func Fatal(format string, args ...interface{}) {
+	if globalLogger == nil {
+		log.Printf("[FATAL] "+format, args...)
+		os.Exit(1)
+	}
 	globalLogger.log(LevelFatal, 4, format, args...)
 	os.Exit(1)
 }
