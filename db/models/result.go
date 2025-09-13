@@ -12,7 +12,6 @@ type Result struct {
 	Clicked          bool      `db:"clicked" json:"clicked"`
 	ClickedAt        time.Time `db:"clicked_at" json:"clicked_at"`
 	Rating           int       `db:"rating" json:"rating"`
-	//User             *User      `db:"-" json:"user,omitempty"`
 }
 
 // возврат имени таблицы в БД
@@ -53,7 +52,7 @@ func (r *Result) Validate() error {
 
 // возвращение оценки алгоритма
 func (r *Result) HasRating() bool {
-	return r.Rating > 0
+	return r.Rating >= 0
 }
 
 // проверка на положительную оценку рейтинга

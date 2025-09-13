@@ -62,7 +62,7 @@ func (r *Repository) CreateSchema(ctx context.Context) error {
 			recommendation_id VARCHAR(255) NOT NULL,
 			clicked BOOLEAN DEFAULT false,
 			clicked_at TIMESTAMP,
-			rating INTEGER CHECK (rating >= 1 AND rating <= 5)
+			rating INTEGER CHECK (rating >= 0 AND rating <= 5)
 		)
 	`
 
