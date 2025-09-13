@@ -279,7 +279,7 @@ func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (
 	}
 	defer rows.Close()
 
-	stats := make(map[string]interface{})
+	stats := make(map[string]any)
 	for rows.Next() {
 		var group string
 		var totalRec, totalClicks int
@@ -291,7 +291,7 @@ func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (
 			continue
 		}
 
-		groupStats := make(map[string]interface{})
+		groupStats := make(map[string]any)
 		groupStats["total_recommendations"] = totalRec
 		groupStats["total_clicks"] = totalClicks
 
