@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 package cmd
+=======
+package main
+>>>>>>> feat-main-ui
 
 import (
 	"testing-platform/db"
@@ -9,10 +13,13 @@ import (
 	"fyne.io/fyne/v2/app"
 )
 
+<<<<<<< HEAD
 type Application struct {
 	rep *db.Repository
 }
 
+=======
+>>>>>>> feat-main-ui
 func main() {
 	// инициализация логгера
 	if err := logger.InitGlobal("logs/app.log", logger.LevelInfo); err != nil {
@@ -39,7 +46,11 @@ func main() {
 	// создание UI
 	fyneApp := app.New()
 	mainWindow := ui.NewMainWindow(fyneApp, rep)
+<<<<<<< HEAD
 	mainWindow.CreateUI()
+=======
+	mainWindow.CreatUI()
+>>>>>>> feat-main-ui
 	mainWindow.Show()
 
 	//запуск приложения
