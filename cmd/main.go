@@ -4,6 +4,9 @@ import (
 	"testing-platform/db"
 	"testing-platform/db/models"
 	"testing-platform/pkg/logger"
+	"testing-platform/ui"
+
+	"fyne.io/fyne/v2/app"
 )
 
 type Application struct {
@@ -33,5 +36,12 @@ func main() {
 	if err != nil {
 		logger.Fatal("Ошибка инициализации репозитория: %v", err)
 	}
+	// создание UI
+	fyneApp := app.New()
+	mainWindow := ui.NewMainWindow(fyneApp, rep)
+	mainWindow.CreateUI()
+	mainWindow.Show()
 
+	//запуск приложения
+	fyneApp.Run()
 }
