@@ -9,6 +9,7 @@ import (
 )
 
 type MainWindow struct {
+	app    fyne.App
 	window fyne.Window
 	rep    *db.Repository
 }
@@ -18,6 +19,7 @@ func NewMainWindow(app fyne.App, rep *db.Repository) *MainWindow {
 	window.Resize(fyne.NewSize(600, 400))
 
 	return &MainWindow{
+		app:    app,
 		window: window,
 		rep:    rep,
 	}
