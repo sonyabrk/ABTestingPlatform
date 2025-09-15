@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"testing-platform/db"
@@ -8,10 +8,6 @@ import (
 
 	"fyne.io/fyne/v2/app"
 )
-
-type Application struct {
-	rep *db.Repository
-}
 
 func main() {
 	// инициализация логгера
@@ -39,7 +35,7 @@ func main() {
 	// создание UI
 	fyneApp := app.New()
 	mainWindow := ui.NewMainWindow(fyneApp, rep)
-	mainWindow.CreateUI()
+	mainWindow.CreatUI()
 	mainWindow.Show()
 
 	//запуск приложения
