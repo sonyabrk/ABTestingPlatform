@@ -2,23 +2,28 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"testing-platform/db/models"
 	"testing-platform/pkg/logger"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // хранение подключения к БД
 type Repository struct {
 	pool *pgxpool.Pool
+	db   *sql.DB
 }
 
 // конструктор с проверкой подключения
-func NewReposit(pool *pgxpool.Pool) (*Repository, error) {
-	if pool == nil {
+func NewReposit(pool *pgxpool.Pool, db *sql.DB) (*Repository, error) {
+	if pool == nil || db == nil {
 		return nil, errors.New("пул подключений не может быть nil")
 	}
 	// проверка работы подключения
@@ -29,51 +34,31 @@ func NewReposit(pool *pgxpool.Pool) (*Repository, error) {
 		return nil, fmt.Errorf("пул подключений не активен: %w", err)
 	}
 	logger.Info("Репозиторий успешно инициализирован")
-	return &Repository{pool: pool}, nil
+	return &Repository{pool: pool, db: db}, nil
 }
 
 // метод для создания структуры БД
 func (r *Repository) CreateSchema(ctx context.Context) error {
-	logger.Info("Выполнение DDL: создание схемы БД")
-	sql := `
-		CREATE TYPE algorithm_type AS ENUM ('collaborative', 'content_based', 'hybrid', 'popularity_based');
-        
-        CREATE TABLE IF NOT EXISTS experiments (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(255) NOT NULL UNIQUE,
-            algorithm_a algorithm_type NOT NULL,
-            algorithm_b algorithm_type NOT NULL,
-            user_percent INTEGER CHECK (user_percent > 0 AND user_percent <= 100),
-            start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_active BOOLEAN DEFAULT true,
-			tags TEXT[] DEFAULT '{}'
-        );
+	logger.Info("Выполнение миграций БД")
 
-		CREATE TABLE IF NOT EXISTS users (
-			id SERIAL PRIMARY KEY,
-			experiment_id INTEGER REFERENCES experiments(id) ON DELETE CASCADE,
-			user_id VARCHAR(255) NOT NULL,
-			group_name VARCHAR(10) NOT NULL CHECK (group_name IN ('A', 'B')),
-			UNIQUE(experiment_id, user_id)
-		);
-
-		CREATE TABLE IF NOT EXISTS results (
-			id SERIAL PRIMARY KEY,
-			user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-			recommendation_id VARCHAR(255) NOT NULL,
-			clicked BOOLEAN DEFAULT false,
-			clicked_at TIMESTAMP,
-			rating INTEGER CHECK (rating >= 0 AND rating <= 5)
-		)
-	`
-
-	// выполнение sql-запроса
-	_, err := r.pool.Exec(ctx, sql)
+	// использование стандартное подключение для миграций / получение драйвера для базы данных
+	driver, err := postgres.WithInstance(r.db, &postgres.Config{})
 	if err != nil {
-		logger.Error("Ошибка при создании схемы БД: %v", err) // лог ошибки для диагностики
-		return fmt.Errorf("не удалось создать структуру базы данных : %w", err)
+		return fmt.Errorf("не удалось создать драйвер БД: %w", err)
 	}
-	logger.Info("Схема БД успешно создана") //лог успешного выполнения
+	// создание экземпляра миграций
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://migrations",
+		"postgres", driver)
+	if err != nil {
+		return fmt.Errorf("не удалось создать миграцию: %w", err)
+	}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("не удалось применить миграции: %w", err)
+	}
+
+	logger.Info("Миграции БД успешно применены")
 	return nil
 }
 
@@ -154,12 +139,12 @@ func (r *Repository) AddResult(ctx context.Context, res *models.Result) error {
 
 	if res.Clicked {
 		if res.ClickedAt != nil {
-			// Если время клика указано явно
+			// если время клика указано явно
 			sql = `INSERT INTO results (user_id, recommendation_id, clicked, clicked_at, rating) 
                    VALUES ($1, $2, $3, $4, $5)`
 			args = []any{res.UserId, res.RecommendationId, res.Clicked, res.ClickedAt, res.Rating}
 		} else {
-			// Если время клика не указано - используем текущее время
+			// если время клика не указано - используем текущее время
 			sql = `INSERT INTO results (user_id, recommendation_id, clicked, clicked_at, rating) 
                    VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)`
 			args = []any{res.UserId, res.RecommendationId, res.Clicked, res.Rating}

@@ -33,33 +33,3 @@ func (u *User) Validate() error {
 	}
 	return nil
 }
-
-// методы для инкапсулиции логики проверки
-
-// возвращение группы эксперимента
-func (u *User) HasGroupName() string {
-	return u.GroupName
-}
-
-// принадлежит ли пользователь к группе А
-func (u *User) IsGroupA() bool {
-	return u.GroupName == "A"
-}
-
-// принадлежит ли пользователь к группе В
-func (u *User) IsGroupB() bool {
-	return u.GroupName == "B"
-}
-
-// получение описания эксперимента
-func (u *User) GetGroupDescription() string {
-	if u.IsGroupA() {
-		return "Группа A (тестовая)"
-	}
-	return "Группа B (тестовая)"
-}
-
-// проверка, имеет ли пользватель назначенный айди эксперимента
-func (u *User) IsAssignedToExperiment(experimentID int) bool {
-	return u.ExperimentId == experimentID
-}

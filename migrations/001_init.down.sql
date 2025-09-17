@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS results;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS experiments;
+DROP TYPE IF EXISTS algorithm_type;

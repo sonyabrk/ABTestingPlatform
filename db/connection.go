@@ -2,11 +2,13 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing-platform/pkg/logger"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // кофигурация подключения к бд
@@ -55,6 +57,35 @@ func Connect(cfg Config) (*pgxpool.Pool, error) {
 
 	logger.Info("Подключение к базе данных установлено успешно")
 	return pool, nil
+}
+
+// функцию для создания стандартного подключения
+func ConnectSQL(cfg Config) (*sql.DB, error) {
+	logger.Info("Подключение к базе данных (стандартное): %s@%s:%d/%s", cfg.User, cfg.Host, cfg.Port, cfg.DBName)
+
+	conStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode)
+
+	db, err := sql.Open("pgx", conStr)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка подключения: %w", err)
+	}
+
+	// настройка пула подключений
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(time.Hour)
+
+	// проверка подключения
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("ошибка ping: %w", err)
+	}
+
+	logger.Info("Подключение к базе данных установлено успешно")
+	return db, nil
 }
 
 // закрытие пула подключений к бд
