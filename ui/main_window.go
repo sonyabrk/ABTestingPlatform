@@ -25,7 +25,7 @@ func NewMainWindow(app fyne.App, rep *db.Repository) *MainWindow {
 	}
 }
 
-func (mw *MainWindow) CreatUI() {
+func (mw *MainWindow) CreateUI() {
 	createSchemaBtn := widget.NewButton("Создать схему и таблицы", mw.createSchemaHandler)
 	addDataBtn := widget.NewButton("Внести данные", mw.showDataInputDialog)
 	showDataBtn := widget.NewButton("Показать данные", mw.showDataDisplayWindow)

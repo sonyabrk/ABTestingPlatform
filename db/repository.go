@@ -45,7 +45,8 @@ func (r *Repository) CreateSchema(ctx context.Context) error {
             algorithm_b algorithm_type NOT NULL,
             user_percent INTEGER CHECK (user_percent > 0 AND user_percent <= 100),
             start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_active BOOLEAN DEFAULT true
+            is_active BOOLEAN DEFAULT true,
+			tags TEXT[] DEFAULT '{}'
         );
 
 		CREATE TABLE IF NOT EXISTS users (
@@ -90,10 +91,10 @@ func (r *Repository) CreateExperiment(ctx context.Context, exp *models.Experimen
 
 	logger.Info("Выполнение DML: создание эксперимента '%s'", exp.Name)
 
-	sql := `INSERT INTO experiments (name, algorithm_a, algorithm_b, user_percent, is_active) 
-	         VALUES ($1, $2, $3, $4, $5) RETURNING id, start_date`
+	sql := `INSERT INTO experiments (name, algorithm_a, algorithm_b, user_percent, is_active, tags) 
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, start_date`
 
-	err = tx.QueryRow(ctx, sql, exp.Name, exp.AlgorithmA, exp.AlgorithmB, exp.UserPercent, exp.IsActive).Scan(&exp.ID, &exp.StartDate)
+	err = tx.QueryRow(ctx, sql, exp.Name, exp.AlgorithmA, exp.AlgorithmB, exp.UserPercent, exp.IsActive, exp.Tags).Scan(&exp.ID, &exp.StartDate)
 
 	if err != nil {
 		logger.Error("Ошибка при создании эксперимента: %v", err)
@@ -149,17 +150,27 @@ func (r *Repository) AddResult(ctx context.Context, res *models.Result) error {
 	logger.Info("Добавление результата для пользователя %d, рекомендация %s", res.UserId, res.RecommendationId)
 
 	var sql string
+	var args []any
 
 	if res.Clicked {
-		sql = `INSERT INTO results (user_id, recommendation_id, clicked, clicked_at, rating) 
-               VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)`
-		_, err = tx.Exec(ctx, sql, res.UserId, res.RecommendationId, res.Clicked, res.Rating)
+		if res.ClickedAt != nil {
+			// Если время клика указано явно
+			sql = `INSERT INTO results (user_id, recommendation_id, clicked, clicked_at, rating) 
+                   VALUES ($1, $2, $3, $4, $5)`
+			args = []any{res.UserId, res.RecommendationId, res.Clicked, res.ClickedAt, res.Rating}
+		} else {
+			// Если время клика не указано - используем текущее время
+			sql = `INSERT INTO results (user_id, recommendation_id, clicked, clicked_at, rating) 
+                   VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)`
+			args = []any{res.UserId, res.RecommendationId, res.Clicked, res.Rating}
+		}
 	} else {
 		sql = `INSERT INTO results (user_id, recommendation_id, clicked, rating) 
                VALUES ($1, $2, $3, $4)`
-		_, err = tx.Exec(ctx, sql, res.UserId, res.RecommendationId, res.Clicked, res.Rating)
+		args = []any{res.UserId, res.RecommendationId, res.Clicked, res.Rating}
 	}
 
+	_, err = tx.Exec(ctx, sql, args...)
 	if err != nil {
 		logger.Error("Ошибка при добавлении результата: %v", err)
 		return fmt.Errorf("не удалось добавить результат: %w", err)
@@ -176,8 +187,8 @@ func (r *Repository) AddResult(ctx context.Context, res *models.Result) error {
 func (r *Repository) GetExperiments(ctx context.Context) ([]models.Experiment, error) {
 	logger.Info("Запрос списка экспериментов")
 
-	sql := `SELECT id, name, algorithm_a, algorithm_b, user_percent, start_date, is_active 
-	         FROM experiments ORDER BY start_date DESC`
+	sql := `SELECT id, name, algorithm_a, algorithm_b, user_percent, start_date, is_active, tags 
+             FROM experiments ORDER BY start_date DESC`
 
 	rows, err := r.pool.Query(ctx, sql)
 	if err != nil {
@@ -190,7 +201,7 @@ func (r *Repository) GetExperiments(ctx context.Context) ([]models.Experiment, e
 	for rows.Next() {
 		var exp models.Experiment
 		err := rows.Scan(&exp.ID, &exp.Name, &exp.AlgorithmA, &exp.AlgorithmB,
-			&exp.UserPercent, &exp.StartDate, &exp.IsActive)
+			&exp.UserPercent, &exp.StartDate, &exp.IsActive, &exp.Tags)
 		if err != nil {
 			logger.Error("Ошибка при сканировании строки эксперимента: %v", err)
 			continue
@@ -257,9 +268,17 @@ func (r *Repository) UpdateExperimentStatus(ctx context.Context, experimentID in
 
 // возвращение статистики по эксперименту
 // считает статистику по группам пользователей: количество рекомендаций, кликов, средний рейтинг и CTR (метрика кликабельности)
-func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (map[string]any, error) {
+func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (*models.ExperimentStats, error) {
 	logger.Info("Запрос статистики для эксперимента %d", experimentID)
 
+	// получение тегов эксперимента
+	var tags []string
+	err := r.pool.QueryRow(ctx, "SELECT tags FROM experiments WHERE id = $1", experimentID).Scan(&tags)
+	if err != nil {
+		logger.Error("Ошибка при получении тегов эксперимента: %v", err)
+		return nil, fmt.Errorf("не удалось получить теги эксперимента: %w", err)
+	}
+	// SQL запрос для агрегации статистики по группам (группировка по группам A/B/общее количество рекомендаций/кол-во кликов/средний рейтинг)
 	sql := `
 		SELECT 
 			u.group_name,
@@ -271,7 +290,7 @@ func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (
 		WHERE u.experiment_id = $1
 		GROUP BY u.group_name
 	`
-
+	// выполнение запроса к бд
 	rows, err := r.pool.Query(ctx, sql, experimentID)
 	if err != nil {
 		logger.Error("Ошибка при запросе статистики эксперимента: %v", err)
@@ -279,35 +298,64 @@ func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (
 	}
 	defer rows.Close()
 
-	stats := make(map[string]any)
+	stats := &models.ExperimentStats{
+		ExperimentID: experimentID,
+		Groups:       make(map[string]models.GroupStats),
+		Tags:         tags,
+	}
+
+	var totalRec, totalClicks int
+	var totalRating, totalCTR float64
+	var groupCount int
+	// итерация по результатам запроса (по каждой группе)
 	for rows.Next() {
 		var group string
-		var totalRec, totalClicks int
+		var groupRec, groupClicks int
 		var avgRating *float64
 
-		err := rows.Scan(&group, &totalRec, &totalClicks, &avgRating)
+		err := rows.Scan(&group, &groupRec, &groupClicks, &avgRating)
 		if err != nil {
 			logger.Error("Ошибка при сканировании строки статистики: %v", err)
 			continue
 		}
 
-		groupStats := make(map[string]any)
-		groupStats["total_recommendations"] = totalRec
-		groupStats["total_clicks"] = totalClicks
+		groupStats := models.GroupStats{
+			Group:                group,
+			TotalRecommendations: groupRec,
+			TotalClicks:          groupClicks,
+		}
 
 		if avgRating != nil {
-			groupStats["avg_rating"] = *avgRating
+			groupStats.AvgRating = *avgRating
+			totalRating += *avgRating
 		} else {
-			groupStats["avg_rating"] = 0.0
+			groupStats.AvgRating = 0
 		}
 
-		if totalRec > 0 {
-			groupStats["ctr"] = float64(totalClicks) / float64(totalRec)
+		if groupRec > 0 {
+			groupStats.CTR = float64(groupClicks) / float64(groupRec)
+			totalCTR += groupStats.CTR
 		} else {
-			groupStats["ctr"] = 0.0
+			groupStats.CTR = 0
 		}
 
-		stats[group] = groupStats
+		stats.Groups[group] = groupStats
+
+		// сумма общей статистики
+		totalRec += groupRec
+		totalClicks += groupClicks
+		groupCount++
+	}
+
+	// рассчет общей статистики
+	if groupCount > 0 {
+		stats.TotalStats = models.GroupStats{
+			Group:                "total",
+			TotalRecommendations: totalRec,
+			TotalClicks:          totalClicks,
+			AvgRating:            totalRating / float64(groupCount),
+			CTR:                  totalCTR / float64(groupCount),
+		}
 	}
 
 	logger.Info("Статистика для эксперимента %d успешно получена", experimentID)

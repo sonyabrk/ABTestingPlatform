@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing-platform/db/models"
 	"testing-platform/pkg/logger"
 
@@ -33,8 +35,7 @@ func (mw *MainWindow) showDataInputDialog() {
 		container.NewTabItem("Пользователь", mw.createUserForm()),
 		container.NewTabItem("Результат", mw.createResultForm()),
 	)
-	// размещение вкладок в верхней части окна
-	tabs.SetTabLocation(container.TabLocationTop)
+	// модальный диалог
 	dialog.ShowCustom("Внести данные", "Закрыть", tabs, mw.window)
 }
 
@@ -46,6 +47,15 @@ func (mw *MainWindow) createExperimentForm() *widget.Form {
 	algorithmB := widget.NewSelect([]string{"collaborative", "content_based", "hybrid", "popularity_based"}, nil)
 	userPercent := widget.NewEntry()
 	isActive := widget.NewCheck("Активный эксперимент", nil)
+	tagsEntry := widget.NewEntry()
+	tagsEntry.SetPlaceHolder("Введите теги через запятую")
+	// валидатор для числового поля
+	userPercent.Validator = func(s string) error {
+		if _, err := strconv.Atoi(s); err != nil {
+			return fmt.Errorf("должно быть числом")
+		}
+		return nil
+	}
 	// форма с элементами
 	form := &widget.Form{
 		Items: []*widget.FormItem{
@@ -54,19 +64,28 @@ func (mw *MainWindow) createExperimentForm() *widget.Form {
 			{Text: "Алгоритм B", Widget: algorithmB},
 			{Text: "Процент пользователей", Widget: userPercent},
 			{Text: "Статус", Widget: isActive},
+			{Text: "Теги", Widget: tagsEntry},
 		},
 		OnSubmit: func() {
+			// преобразование текста в число с проверкой ошибок
+			userPercentVal, err := strconv.Atoi(userPercent.Text)
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("неверное значение процента пользователей"), mw.window)
+				return
+			}
+			tags := parseTags(tagsEntry.Text)
 			// объект модели из данных формы
 			exp := &models.Experiment{
 				Name:        name.Text,
 				AlgorithmA:  algorithmA.Selected,
 				AlgorithmB:  algorithmB.Selected,
-				UserPercent: parseInt(userPercent.Text),
+				UserPercent: userPercentVal,
 				IsActive:    isActive.Checked,
+				Tags:        tags,
 			}
 
 			ctx := context.Background()
-			err := mw.rep.CreateExperiment(ctx, exp)
+			err = mw.rep.CreateExperiment(ctx, exp)
 			if err != nil {
 				logger.Error("Ошибка создания эксперимента: %v", err)
 				dialog.ShowError(err, mw.window)
@@ -86,6 +105,13 @@ func (mw *MainWindow) createUserForm() *widget.Form {
 	experimentId := widget.NewEntry()
 	userId := widget.NewEntry()
 	groupName := widget.NewSelect([]string{"A", "B"}, nil)
+	// валидатор для числового поля
+	experimentId.Validator = func(s string) error {
+		if _, err := strconv.Atoi(s); err != nil {
+			return fmt.Errorf("должно быть числом")
+		}
+		return nil
+	}
 
 	form := &widget.Form{
 		Items: []*widget.FormItem{
@@ -94,15 +120,21 @@ func (mw *MainWindow) createUserForm() *widget.Form {
 			{Text: "Группа", Widget: groupName},
 		},
 		OnSubmit: func() {
+			// преобразование текста в число с проверкой ошибок
+			experimentIdVal, err := strconv.Atoi(experimentId.Text)
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("неверное значение ID эксперимента"), mw.window)
+				return
+			}
 			// объект пользоватлея
 			user := &models.User{
-				ExperimentId: parseInt(experimentId.Text),
+				ExperimentId: experimentIdVal,
 				UserId:       userId.Text,
 				GroupName:    groupName.Selected,
 			}
 
 			ctx := context.Background()
-			err := mw.rep.AddUserToExperiment(ctx, user)
+			err = mw.rep.AddUserToExperiment(ctx, user)
 			if err != nil {
 				logger.Error("Ошибка добавления пользователя: %v", err)
 				dialog.ShowError(err, mw.window)
@@ -122,6 +154,23 @@ func (mw *MainWindow) createResultForm() *widget.Form {
 	recommendationId := widget.NewEntry()
 	clicked := widget.NewCheck("Кликнут", nil)
 	rating := widget.NewEntry()
+	// валидаторы для числовых полей
+	userId.Validator = func(s string) error {
+		if _, err := strconv.Atoi(s); err != nil {
+			return fmt.Errorf("должно быть числом")
+		}
+		return nil
+	}
+
+	rating.Validator = func(s string) error {
+		if s == "" {
+			return nil
+		}
+		if _, err := strconv.Atoi(s); err != nil {
+			return fmt.Errorf("должно быть числом")
+		}
+		return nil
+	}
 
 	form := &widget.Form{
 		Items: []*widget.FormItem{
@@ -131,16 +180,32 @@ func (mw *MainWindow) createResultForm() *widget.Form {
 			{Text: "Рейтинг", Widget: rating},
 		},
 		OnSubmit: func() {
+			// преобразование текст в число с проверкой ошибок
+			userIdVal, err := strconv.Atoi(userId.Text)
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("неверное значение ID пользователя"), mw.window)
+				return
+			}
+
+			var ratingVal int
+			if rating.Text != "" {
+				ratingVal, err = strconv.Atoi(rating.Text)
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("неверное значение рейтинга"), mw.window)
+					return
+				}
+			}
 			// объект результата
 			result := &models.Result{
-				UserId:           parseInt(userId.Text),
+				UserId:           userIdVal,
 				RecommendationId: recommendationId.Text,
 				Clicked:          clicked.Checked,
-				Rating:           parseInt(rating.Text),
+				ClickedAt:        nil,
+				Rating:           ratingVal,
 			}
 
 			ctx := context.Background()
-			err := mw.rep.AddResult(ctx, result)
+			err = mw.rep.AddResult(ctx, result)
 			if err != nil {
 				logger.Error("Ошибка добавления результата: %v", err)
 				dialog.ShowError(err, mw.window)
@@ -151,4 +216,17 @@ func (mw *MainWindow) createResultForm() *widget.Form {
 		},
 	}
 	return form
+}
+
+// вспомогательная функция для парсинга тегов
+func parseTags(tagsStr string) []string {
+	if tagsStr == "" {
+		return []string{}
+	}
+
+	tags := strings.Split(tagsStr, ",")
+	for i, tag := range tags {
+		tags[i] = strings.TrimSpace(tag)
+	}
+	return tags
 }

@@ -24,7 +24,7 @@ func main() {
 	// подключение к базе данных
 	pool, err := db.Connect(config.Database)
 	if err != nil {
-		logger.Fatal("Оштбка подключения к базе данных: %v", err)
+		logger.Fatal("Ошибка подключения к базе данных: %v", err)
 	}
 	defer db.Close(pool)
 	// инициализация репозитория
@@ -35,7 +35,7 @@ func main() {
 	// создание UI
 	fyneApp := app.New()
 	mainWindow := ui.NewMainWindow(fyneApp, rep)
-	mainWindow.CreatUI()
+	mainWindow.CreateUI()
 	mainWindow.Show()
 
 	//запуск приложения

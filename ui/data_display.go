@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing-platform/pkg/logger"
 
 	"fyne.io/fyne/v2"
@@ -35,12 +36,13 @@ func (mw *MainWindow) showDataDisplayWindow() {
 			fmt.Sprintf("%d", exp.UserPercent),
 			exp.StartDate.Format("2006-01-02"),
 			fmt.Sprintf("%t", exp.IsActive),
+			strings.Join(exp.Tags, ", "),
 		})
 	}
 
 	table := widget.NewTable(
 		func() (int, int) {
-			return len(data), 7
+			return len(data), 8
 		},
 		func() fyne.CanvasObject {
 			return widget.NewLabel("template")
@@ -57,6 +59,7 @@ func (mw *MainWindow) showDataDisplayWindow() {
 	table.SetColumnWidth(4, 80)  // User Percent
 	table.SetColumnWidth(5, 100) // Start Date
 	table.SetColumnWidth(6, 80)  // Is Active
+	table.SetColumnWidth(7, 150) // Tags
 
 	closeBtn := widget.NewButton("Закрыть", func() {
 		dataWin.Close()

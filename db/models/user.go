@@ -59,11 +59,6 @@ func (u *User) GetGroupDescription() string {
 	return "Группа B (тестовая)"
 }
 
-// можно ли пользователю присвоить эксперимент
-func (u *User) CanBeAssigned(experimentId int) bool {
-	return u.UserId != "" && u.ExperimentId > 0
-}
-
 // проверка, имеет ли пользватель назначенный айди эксперимента
 func (u *User) IsAssignedToExperiment(experimentID int) bool {
 	return u.ExperimentId == experimentID

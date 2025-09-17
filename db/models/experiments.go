@@ -15,6 +15,24 @@ type Experiment struct {
 	UserPercent int       `db:"user_percent" json:"user_percent"`
 	StartDate   time.Time `db:"start_date" json:"start_date"`
 	IsActive    bool      `db:"is_active" json:"is_active"`
+	Tags        []string  `db:"tags" json:"tags"`
+}
+
+// GroupStats представляет статистику для одной группы
+type GroupStats struct {
+	Group                string  `json:"group"`
+	TotalRecommendations int     `json:"total_recommendations"`
+	TotalClicks          int     `json:"total_clicks"`
+	AvgRating            float64 `json:"avg_rating"`
+	CTR                  float64 `json:"ctr"`
+}
+
+// ExperimentStats представляет полную статистику эксперимента
+type ExperimentStats struct {
+	ExperimentID int                   `json:"experiment_id"`
+	Groups       map[string]GroupStats `json:"groups"`
+	TotalStats   GroupStats            `json:"total_stats"`
+	Tags         []string              `json:"tags,omitempty"`
 }
 
 // возврат имени таблицы в БД
@@ -48,6 +66,14 @@ func (e *Experiment) Validate() error {
 	}
 	if e.AlgorithmA == e.AlgorithmB {
 		return errors.New("алгоритмы A и B не могут быть одинаковыми")
+	}
+	if len(e.Tags) > 10 {
+		return errors.New("слишком много тегов (максимум 10)")
+	}
+	for _, tag := range e.Tags {
+		if len(tag) > 50 {
+			return errors.New("тег слишком длинный (максимум 50 символов)")
+		}
 	}
 	return nil
 }
