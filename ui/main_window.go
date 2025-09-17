@@ -29,6 +29,7 @@ func (mw *MainWindow) CreateUI() {
 	createSchemaBtn := widget.NewButton("Создать схему и таблицы", mw.createSchemaHandler)
 	addDataBtn := widget.NewButton("Внести данные", mw.showDataInputDialog)
 	showDataBtn := widget.NewButton("Показать данные", mw.showDataDisplayWindow)
+	showSummaryBtn := widget.NewButton("Сводные данные", mw.showSummaryWindow)
 
 	content := container.NewVBox(
 		widget.NewLabel("А/В Testing Platform для рекомендательных систем"),
@@ -36,6 +37,7 @@ func (mw *MainWindow) CreateUI() {
 		createSchemaBtn,
 		addDataBtn,
 		showDataBtn,
+		showSummaryBtn,
 	)
 	mw.window.SetContent(content)
 }

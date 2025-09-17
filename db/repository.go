@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing-platform/db/models"
 	"testing-platform/pkg/logger"
 	"time"
@@ -168,14 +169,48 @@ func (r *Repository) AddResult(ctx context.Context, res *models.Result) error {
 	return nil
 }
 
-// возвращение списока всех экспериментов
-func (r *Repository) GetExperiments(ctx context.Context) ([]models.Experiment, error) {
-	logger.Info("Запрос списка экспериментов")
+// возвращение списка всех экспериментов
+func (r *Repository) GetExperiments(ctx context.Context, filter models.ExperimentFilter) ([]models.Experiment, error) {
+	logger.Info("Запрос списка экспериментов с фильтром: %+v", filter)
+	// базовый SQL запрос без условий фильтрации
+	baseQuery := `SELECT id, name, algorithm_a, algorithm_b, user_percent, start_date, is_active, tags 
+                 FROM experiments WHERE 1=1`
+	// слайс для хранения значений параметров запроса (защита от SQL-инъекций)
+	var args []any
+	var conditions []string
+	// условие фильтрации по алгоритму A, если указан
+	if filter.AlgorithmA != "" {
+		conditions = append(conditions, fmt.Sprintf("algorithm_a = $%d", len(args)+1))
+		args = append(args, filter.AlgorithmA)
+	}
+	// условие фильтрации по алгоритму B, если указан
+	if filter.AlgorithmB != "" {
+		conditions = append(conditions, fmt.Sprintf("algorithm_b = $%d", len(args)+1))
+		args = append(args, filter.AlgorithmB)
+	}
+	// добавление условия фильтрации по активности, если указано / использование указателя *bool для различия "не указано" и "false"
+	if filter.IsActive != nil {
+		conditions = append(conditions, fmt.Sprintf("is_active = $%d", len(args)+1))
+		args = append(args, *filter.IsActive)
+	}
+	// добавление условия фильтрации по начальной дате, если указана / IsZero() проверяет, что дата не нулевая (не time.Time{})
+	if !filter.StartDateFrom.IsZero() {
+		conditions = append(conditions, fmt.Sprintf("start_date >= $%d", len(args)+1))
+		args = append(args, filter.StartDateFrom)
+	}
+	// условие фильтрации по конечной дате, если указана
+	if !filter.StartDateTo.IsZero() {
+		conditions = append(conditions, fmt.Sprintf("start_date <= $%d", len(args)+1))
+		args = append(args, filter.StartDateTo)
+	}
 
-	sql := `SELECT id, name, algorithm_a, algorithm_b, user_percent, start_date, is_active, tags 
-             FROM experiments ORDER BY start_date DESC`
+	if len(conditions) > 0 {
+		baseQuery += " AND " + strings.Join(conditions, " AND ")
+	}
+	// сортировка по дате начала (новые сначала)
+	baseQuery += " ORDER BY start_date DESC"
 
-	rows, err := r.pool.Query(ctx, sql)
+	rows, err := r.pool.Query(ctx, baseQuery, args...)
 	if err != nil {
 		logger.Error("Ошибка при запросе списка экспериментов: %v", err)
 		return nil, fmt.Errorf("не удалось получить список экспериментов: %w", err)
@@ -183,6 +218,7 @@ func (r *Repository) GetExperiments(ctx context.Context) ([]models.Experiment, e
 	defer rows.Close()
 
 	var experiments []models.Experiment
+	// итерация по всем строкам результата
 	for rows.Next() {
 		var exp models.Experiment
 		err := rows.Scan(&exp.ID, &exp.Name, &exp.AlgorithmA, &exp.AlgorithmB,
@@ -345,4 +381,54 @@ func (r *Repository) GetExperimentStats(ctx context.Context, experimentID int) (
 
 	logger.Info("Статистика для эксперимента %d успешно получена", experimentID)
 	return stats, nil
+}
+
+// функция возвращает сводные данные экспериментов с JOIN
+func (r *Repository) GetExperimentResultsWithDetails(ctx context.Context) ([]models.ExperimentResult, error) {
+	logger.Info("Запрос сводных данных экспериментов")
+
+	// SQL запрос с JOIN между experiments, users и results (группировка по эксперименту и агрегация данных по результатам)
+	sql := `SELECT 
+                e.id, 
+                e.name, 
+                e.algorithm_a, 
+                e.algorithm_b, 
+                COUNT(r.id) as total_results,
+                SUM(CASE WHEN r.clicked THEN 1 ELSE 0 END) as total_clicks,
+                AVG(CASE WHEN r.rating > 0 THEN r.rating::float ELSE NULL END) as avg_rating
+            FROM experiments e
+            LEFT JOIN users u ON e.id = u.experiment_id
+            LEFT JOIN results r ON u.id = r.user_id
+            GROUP BY e.id, e.name
+            ORDER BY e.start_date DESC`
+
+	// выполнение запроса
+	rows, err := r.pool.Query(ctx, sql)
+	if err != nil {
+		logger.Error("Ошибка при запросе сводных данных: %v", err)
+		return nil, fmt.Errorf("не удалось получить сводные данные: %w", err)
+	}
+	defer rows.Close()
+
+	// обработка результатов запроса
+	var results []models.ExperimentResult
+	for rows.Next() {
+		var res models.ExperimentResult
+		err := rows.Scan(&res.ID, &res.Name, &res.AlgorithmA, &res.AlgorithmB,
+			&res.TotalResults, &res.TotalClicks, &res.AvgRating)
+		if err != nil {
+			logger.Error("Ошибка при сканировании строки: %v", err)
+			continue
+		}
+		results = append(results, res)
+	}
+
+	// проверка ошибок итерации
+	if err := rows.Err(); err != nil {
+		logger.Error("Ошибка при обработке результатов: %v", err)
+		return nil, fmt.Errorf("ошибка обработки результатов: %w", err)
+	}
+
+	logger.Info("Получено %d записей сводных данных", len(results))
+	return results, nil
 }

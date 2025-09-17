@@ -35,6 +35,26 @@ type ExperimentStats struct {
 	Tags         []string              `json:"tags,omitempty"`
 }
 
+// ExperimentFilter представлет структуру для фильтрации
+type ExperimentFilter struct {
+	AlgorithmA    string
+	AlgorithmB    string
+	IsActive      *bool // использование указателя для возможности передачи nil
+	StartDateFrom time.Time
+	StartDateTo   time.Time
+}
+
+// ExperimentResult представляет сводные данные эксперимента с JOIN
+type ExperimentResult struct {
+	ID           int     `json:"id"`
+	Name         string  `json:"name"`
+	AlgorithmA   string  `json:"algorithm_a"`
+	AlgorithmB   string  `json:"algorithm_b"`
+	TotalResults int     `json:"total_results"`
+	TotalClicks  int     `json:"total_clicks"`
+	AvgRating    float64 `json:"avg_rating"`
+}
+
 // возврат имени таблицы в БД
 func (Experiment) TableName() string {
 	return "experiments"
