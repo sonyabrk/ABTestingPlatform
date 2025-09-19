@@ -16,9 +16,6 @@ func (User) TableName() string {
 
 // проверка корректности данных пользователя
 func (u *User) Validate() error {
-	if u.ID < 0 {
-		return errors.New("айди не может быть отрицательным")
-	}
 	if u.ExperimentId < 0 {
 		return errors.New("айди эксперимента не может быть отрицательным")
 	}

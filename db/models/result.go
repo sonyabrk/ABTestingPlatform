@@ -24,9 +24,6 @@ func (r *Result) Validate() error {
 	if r.Rating < 0 || r.Rating > 5 {
 		return errors.New("рейтинг должен быть от 0 до 5")
 	}
-	if r.ID < 0 {
-		return errors.New("айди не может быть отрицательным")
-	}
 	if r.UserId <= 0 {
 		return errors.New("айди пользователя не может быть не положительным")
 	}

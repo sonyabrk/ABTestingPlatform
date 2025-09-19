@@ -18,12 +18,13 @@ import (
 
 // хранение подключения к БД
 type Repository struct {
-	pool *pgxpool.Pool
-	db   *sql.DB
+	pool           *pgxpool.Pool
+	db             *sql.DB
+	migrationsPath string
 }
 
 // конструктор с проверкой подключения
-func NewReposit(pool *pgxpool.Pool, db *sql.DB) (*Repository, error) {
+func NewReposit(pool *pgxpool.Pool, db *sql.DB, migrationsPath string) (*Repository, error) {
 	if pool == nil || db == nil {
 		return nil, errors.New("пул подключений не может быть nil")
 	}
@@ -35,7 +36,7 @@ func NewReposit(pool *pgxpool.Pool, db *sql.DB) (*Repository, error) {
 		return nil, fmt.Errorf("пул подключений не активен: %w", err)
 	}
 	logger.Info("Репозиторий успешно инициализирован")
-	return &Repository{pool: pool, db: db}, nil
+	return &Repository{pool: pool, db: db, migrationsPath: migrationsPath}, nil
 }
 
 // метод для создания структуры БД
@@ -49,7 +50,7 @@ func (r *Repository) CreateSchema(ctx context.Context) error {
 	}
 	// создание экземпляра миграций
 	m, err := migrate.NewWithDatabaseInstance(
-		"file://migrations",
+		r.migrationsPath,
 		"postgres", driver)
 	if err != nil {
 		return fmt.Errorf("не удалось создать миграцию: %w", err)

@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing-platform/db"
 	"testing-platform/db/models"
@@ -44,8 +46,14 @@ func main() {
 	}
 	defer db.Close(pool)
 
+	wd, err := os.Getwd()
+	if err != nil {
+		logger.Fatal("Не удалось определить рабочую директорию: %v", err)
+	}
+	migrationsPath := "file://" + filepath.Join(wd, "db", "migrations")
+
 	// инициализация репозитория с обоими подключениями
-	rep, err := db.NewReposit(pool, sqlDB)
+	rep, err := db.NewReposit(pool, sqlDB, migrationsPath)
 	if err != nil {
 		logger.Fatal("Ошибка инициализации репозитория: %v", err)
 	}
