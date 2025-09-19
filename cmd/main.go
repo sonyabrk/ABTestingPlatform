@@ -50,7 +50,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Не удалось определить рабочую директорию: %v", err)
 	}
-	migrationsPath := "file://" + filepath.Join(wd, "db", "migrations")
+	migrationsPath := "file://" + filepath.Join(wd, "migrations")
 
 	// инициализация репозитория с обоими подключениями
 	rep, err := db.NewReposit(pool, sqlDB, migrationsPath)
