@@ -105,13 +105,28 @@ func (mw *MainWindow) showDataDisplayWindow() {
 		// создание новой таблицы
 		table := widget.NewTable(
 			func() (int, int) {
-				return len(data), 8
+				return len(data) + 1, 8
 			},
 			func() fyne.CanvasObject {
 				return widget.NewLabel("template")
 			},
 			func(i widget.TableCellID, o fyne.CanvasObject) {
-				o.(*widget.Label).SetText(data[i.Row][i.Col])
+				label := o.(*widget.Label)
+
+				// 1ая строка - заголовки
+				if i.Row == 0 {
+					headers := []string{"ID", "Название", "Алгоритм A", "Алгоритм B", "Пользователи %", "Дата начала", "Активен", "Теги"}
+					if i.Col < len(headers) {
+						label.SetText(headers[i.Col])
+						label.TextStyle = fyne.TextStyle{Bold: true}
+					}
+				} else {
+					// смещение данных на одну строку вниз
+					if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
+						label.SetText(data[i.Row-1][i.Col])
+						label.TextStyle = fyne.TextStyle{}
+					}
+				}
 			})
 
 		// установка размеров столбцов
