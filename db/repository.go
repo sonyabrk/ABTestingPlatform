@@ -433,3 +433,15 @@ func (r *Repository) GetExperimentResultsWithDetails(ctx context.Context) ([]mod
 	logger.Info("Получено %d записей сводных данных", len(results))
 	return results, nil
 }
+
+func (r *Repository) ExperimentExists(ctx context.Context, id int) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM experiments WHERE id=$1)", id).Scan(&exists)
+	return exists, err
+}
+
+func (r *Repository) UserExists(ctx context.Context, id int) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)", id).Scan(&exists)
+	return exists, err
+}

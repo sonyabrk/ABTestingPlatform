@@ -96,7 +96,7 @@ func (mw *MainWindow) showDataDisplayWindow() {
 				exp.Name,
 				exp.AlgorithmA,
 				exp.AlgorithmB,
-				fmt.Sprintf("%d", exp.UserPercent),
+				fmt.Sprintf("%.2f", exp.UserPercent),
 				exp.StartDate.Format("2006-01-02"),
 				fmt.Sprintf("%t", exp.IsActive),
 				strings.Join(exp.Tags, ", "),
