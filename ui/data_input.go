@@ -499,7 +499,7 @@ func (mw *MainWindow) createResultForm() *widget.Form {
 				return fmt.Errorf("рейтинг должен быть от 0 до 5")
 			}
 
-			if clicked.Checked && val == 0 {
+			if clicked.Checked && (val < 0 || val > 5) {
 				return fmt.Errorf("при клике рейтинг должен быть от 0 до 5")
 			}
 		}
