@@ -12,7 +12,7 @@ type Experiment struct {
 	Name        string    `db:"name" json:"name"`
 	AlgorithmA  string    `db:"algorithm_a" json:"algorithm_a"`
 	AlgorithmB  string    `db:"algorithm_b" json:"algorithm_b"`
-	UserPercent int       `db:"user_percent" json:"user_percent"`
+	UserPercent float64   `db:"user_percent" json:"user_percent"`
 	StartDate   time.Time `db:"start_date" json:"start_date"`
 	IsActive    bool      `db:"is_active" json:"is_active"`
 	Tags        []string  `db:"tags" json:"tags"`
@@ -75,8 +75,8 @@ func (e *Experiment) Validate() error {
 	if len(e.Name) > 255 {
 		return errors.New("название эксперимента слишком длинное")
 	}
-	if e.UserPercent < 1 || e.UserPercent > 100 {
-		return errors.New("процент пользователей должен быть от 1 до 100")
+	if e.UserPercent < 1.0 || e.UserPercent > 100.0 {
+		return errors.New("процент пользователей должен быть от 1.0 до 100.0")
 	}
 	if e.AlgorithmA == "" {
 		return errors.New("алгоритм A не может быть пустым")
@@ -108,11 +108,6 @@ func (e *Experiment) IsRunning() bool {
 // возвращение названия алгоритмов для отображения
 func (e *Experiment) GetAlgorithmNames() (string, string) {
 	return e.AlgorithmA, e.AlgorithmB
-}
-
-// проверка, можно ли добавлять пользователей в эксперимент
-func (e *Experiment) CanAcceptMoreUsers(currentCount int) bool {
-	return e.IsRunning() && currentCount < e.UserPercent*1000
 }
 
 // проверка уникальности имени эксперимента
