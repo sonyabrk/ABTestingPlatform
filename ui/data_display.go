@@ -85,7 +85,7 @@ func (mw *MainWindow) showDataDisplayWindow() {
 		experiments, err := mw.rep.GetExperiments(ctx, filter)
 		if err != nil {
 			logger.Error("Ошибка получения экспериментов: %v", err)
-			dialog.ShowError(err, dataWin)
+			dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), dataWin)
 			return
 		}
 		// подготовка данных для таблицы
@@ -149,6 +149,11 @@ func (mw *MainWindow) showDataDisplayWindow() {
 		mw.showFilterDialog(updateTable)
 	})
 
+	// кнопка очистки фильтров
+	clearFilterBtn := widget.NewButton("Очистить фильтры", func() {
+		updateTable(models.ExperimentFilter{})
+	})
+
 	// кнопка закрытия
 	closeBtn := widget.NewButton("Закрыть", func() {
 		dataWin.Close()
@@ -157,8 +162,8 @@ func (mw *MainWindow) showDataDisplayWindow() {
 	updateTable(models.ExperimentFilter{})
 	// создание основного контейнера
 	content := container.NewBorder(
-		container.NewHBox(filterBtn), // верхняя панель с кнопкой фильтра
-		container.NewHBox(closeBtn),  // нижняя панель с кнопкой закрытия
+		container.NewHBox(filterBtn, clearFilterBtn), // верхняя панель с кнопками
+		container.NewHBox(closeBtn),                  // нижняя панель с кнопкой закрытия
 		nil, nil,
 		tableContainer, // центральная область с таблицей
 	)
@@ -178,13 +183,15 @@ func (mw *MainWindow) showSummaryWindow() {
 	results, err := mw.rep.GetExperimentResultsWithDetails(ctx)
 	if err != nil {
 		logger.Error("Ошибка получения сводных данных: %v", err)
-		dialog.ShowError(err, mw.window)
+		dialog.ShowError(fmt.Errorf("не удалось получить сводные данные, проверьте соединение с базой данных"), mw.window)
 		return
 	}
 
 	// подготовка данных для таблицы
 	data := make([][]string, 0)
 	for _, res := range results {
+		avgRatingStr := fmt.Sprintf("%.2f", res.AvgRating)
+
 		data = append(data, []string{
 			fmt.Sprintf("%d", res.ID),
 			res.Name,
@@ -192,20 +199,32 @@ func (mw *MainWindow) showSummaryWindow() {
 			res.AlgorithmB,
 			fmt.Sprintf("%d", res.TotalResults),
 			fmt.Sprintf("%d", res.TotalClicks),
-			fmt.Sprintf("%.2f", res.AvgRating),
+			avgRatingStr,
 		})
 	}
 
 	// создание таблицы
 	table := widget.NewTable(
 		func() (int, int) {
-			return len(data), 7
+			return len(data) + 1, 7
 		},
 		func() fyne.CanvasObject {
 			return widget.NewLabel("template")
 		},
 		func(i widget.TableCellID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(data[i.Row][i.Col])
+			label := o.(*widget.Label)
+			if i.Row == 0 {
+				headers := []string{"ID", "Название", "Алгоритм A", "Алгоритм B", "Результаты", "Клики", "Средний рейтинг"}
+				if i.Col < len(headers) {
+					label.SetText(headers[i.Col])
+					label.TextStyle = fyne.TextStyle{Bold: true}
+				}
+			} else {
+				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
+					label.SetText(data[i.Row-1][i.Col])
+					label.TextStyle = fyne.TextStyle{}
+				}
+			}
 		})
 
 	// настройка размеров столбцов
@@ -215,7 +234,7 @@ func (mw *MainWindow) showSummaryWindow() {
 	table.SetColumnWidth(3, 120) // Algorithm B
 	table.SetColumnWidth(4, 100) // Total Results
 	table.SetColumnWidth(5, 100) // Total Clicks
-	table.SetColumnWidth(6, 100) // Avg Rating
+	table.SetColumnWidth(6, 120) // Avg Rating
 
 	// кнопка закрытия
 	closeBtn := widget.NewButton("Закрыть", func() {

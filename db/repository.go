@@ -395,12 +395,12 @@ func (r *Repository) GetExperimentResultsWithDetails(ctx context.Context) ([]mod
                 e.algorithm_a, 
                 e.algorithm_b, 
                 COUNT(r.id) as total_results,
-                SUM(CASE WHEN r.clicked THEN 1 ELSE 0 END) as total_clicks,
-                AVG(CASE WHEN r.rating > 0 THEN r.rating::float ELSE NULL END) as avg_rating
+                COALESCE(SUM(CASE WHEN r.clicked THEN 1 ELSE 0 END), 0) as total_clicks,
+                COALESCE(AVG(CASE WHEN r.rating > 0 THEN r.rating::float ELSE NULL END), 0) as avg_rating
             FROM experiments e
             LEFT JOIN users u ON e.id = u.experiment_id
             LEFT JOIN results r ON u.id = r.user_id
-            GROUP BY e.id, e.name
+            GROUP BY e.id, e.name, e.algorithm_a, e.algorithm_b
             ORDER BY e.start_date DESC`
 
 	// выполнение запроса
@@ -415,11 +415,17 @@ func (r *Repository) GetExperimentResultsWithDetails(ctx context.Context) ([]mod
 	var results []models.ExperimentResult
 	for rows.Next() {
 		var res models.ExperimentResult
+		var avgRating *float64
 		err := rows.Scan(&res.ID, &res.Name, &res.AlgorithmA, &res.AlgorithmB,
-			&res.TotalResults, &res.TotalClicks, &res.AvgRating)
+			&res.TotalResults, &res.TotalClicks, &avgRating)
 		if err != nil {
 			logger.Error("Ошибка при сканировании строки: %v", err)
 			continue
+		}
+		if avgRating != nil {
+			res.AvgRating = *avgRating
+		} else {
+			res.AvgRating = 0.0
 		}
 		results = append(results, res)
 	}

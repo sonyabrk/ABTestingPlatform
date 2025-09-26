@@ -34,38 +34,8 @@ func (mw *MainWindow) createSchemaHandler() {
 	}
 }
 
-// показ диалога с инструкцией перед вводом данных
-func (mw *MainWindow) showInstructionDialog() {
-	instructionText := `Перед внесением данных ознакомьтесь с правилами:
-
-Эксперимент:
-- Название: обязательно, не длиннее 255 символов
-- Алгоритмы: должны быть разными
-- Процент пользователей: число от 0.1 до 100
-- Теги: через запятую, каждый тег не длинее 50 символов
-
-Пользователь:
-- ID эксперимента: целое положительное число
-- ID пользователя: обязательно, не длинее 255 символов (только буквы, цифры, дефисы и подчеркивания)
-- Группа: A или B
-
-Результат:
-- ID пользователя: целое положительное число
-- ID рекомендации: обязательно, не длинее 255 символов (только буквы, цифры, дефисы и подчеркивания)
-- Рейтинг: целое число от 0 до 5 (обязательно при клике)`
-
-	text := widget.NewLabel(instructionText)
-	text.Wrapping = fyne.TextWrapWord
-	scroll := container.NewScroll(text)
-	scroll.SetMinSize(fyne.NewSize(500, 300))
-
-	dialog.ShowCustom("Инструкция по внесению данных", "Понятно", scroll, mw.window)
-}
-
 // создание модального окна для ввода данных с вкладками
 func (mw *MainWindow) showDataInputDialog() {
-	mw.showInstructionDialog()
-
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Эксперимент", mw.createExperimentForm()),
 		container.NewTabItem("Пользователь", mw.createUserForm()),
@@ -77,12 +47,26 @@ func (mw *MainWindow) showDataInputDialog() {
 // создание формы для ввода данных эксперимента
 func (mw *MainWindow) createExperimentForm() *widget.Form {
 	name := widget.NewEntry()
+	name.SetPlaceHolder("Введите название эксперимента")
 	algorithmA := widget.NewSelect([]string{"collaborative", "content_based", "hybrid", "popularity_based"}, nil)
 	algorithmB := widget.NewSelect([]string{"collaborative", "content_based", "hybrid", "popularity_based"}, nil)
 	userPercent := widget.NewEntry()
+	userPercent.SetPlaceHolder("Например: 10.5")
 	isActive := widget.NewCheck("Активный эксперимент", nil)
 	tagsEntry := widget.NewEntry()
-	tagsEntry.SetPlaceHolder("Введите теги через запятую")
+	tagsEntry.SetPlaceHolder("Например: тест, рекомендации, основной")
+
+	nameHint := widget.NewLabel("Обязательное поле, максимум 255 символов")
+	nameHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	algorithmHint := widget.NewLabel("Выберите два разных алгоритма из списка")
+	algorithmHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	userPercentHint := widget.NewLabel("Число от 0.1 до 100 (положительное)")
+	userPercentHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	tagsHint := widget.NewLabel("Теги через запятую (каждый до 50 символов)")
+	tagsHint.TextStyle = fyne.TextStyle{Italic: true}
 
 	// ошибки
 	nameError := widget.NewLabel("")
@@ -96,15 +80,44 @@ func (mw *MainWindow) createExperimentForm() *widget.Form {
 		if s == "" {
 			return fmt.Errorf("поле обязательно для заполнения")
 		}
+
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return fmt.Errorf("поле не может содержать только пробелы")
+		}
+
+		if strings.Count(s, ".") > 1 {
+			return fmt.Errorf("некорректный формат числа (слишком много точек)")
+		}
+
+		if strings.HasPrefix(s, "-") {
+			return fmt.Errorf("число должно быть положительным")
+		}
+
 		val, err := strconv.ParseFloat(s, 64)
 		if err != nil {
 			return fmt.Errorf("значение должно быть числом (например: 10.5)")
 		}
+
 		if math.IsNaN(val) || math.IsInf(val, 0) {
 			return fmt.Errorf("введено недопустимое числовое значение")
 		}
-		if val < 0.1 || val > 100.0 {
-			return fmt.Errorf("процент должен быть от 0.1 до 100")
+
+		if val <= 0 {
+			return fmt.Errorf("число должно быть больше 0")
+		}
+
+		if val < 0.1 {
+			return fmt.Errorf("число должно быть не менее 0.1")
+		}
+
+		if val > 100.0 {
+			return fmt.Errorf("число должно быть не более 100")
+		}
+
+		parts := strings.Split(s, ".")
+		if len(parts) == 2 && len(parts[1]) > 2 {
+			return fmt.Errorf("можно использовать не более 2 знаков после запятой")
 		}
 		return nil
 	}
@@ -119,11 +132,17 @@ func (mw *MainWindow) createExperimentForm() *widget.Form {
 	}
 
 	name.Validator = func(s string) error {
+		s = strings.TrimSpace(s)
 		if s == "" {
 			return fmt.Errorf("поле обязательно для заполнения")
 		}
+
 		if len(s) > 255 {
 			return fmt.Errorf("название слишком длинное (максимум 255 символов)")
+		}
+
+		if matched, _ := regexp.MatchString(`[<>'"\\]`, s); matched {
+			return fmt.Errorf("название содержит недопустимые символы")
 		}
 		return nil
 	}
@@ -137,19 +156,34 @@ func (mw *MainWindow) createExperimentForm() *widget.Form {
 		}
 	}
 
-	// Глобальная переменная для предкомпилированного регулярного выражения
 	var tagRegex = regexp.MustCompile(`^[a-zA-Zа-яА-Я0-9_\-\s]+$`)
 
-	// Валидатор для тегов
 	validateTags := func(s string) error {
 		if s == "" {
 			return nil
 		}
+
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+
 		tags := parseTags(s)
+
+		if len(tags) > 10 {
+			return fmt.Errorf("слишком много тегов (максимум 10)")
+		}
+
 		for _, tag := range tags {
+			tag = strings.TrimSpace(tag)
+			if tag == "" {
+				return fmt.Errorf("тег не может быть пустым")
+			}
+
 			if len(tag) > 50 {
 				return fmt.Errorf("тег '%s' слишком длинный (максимум 50 символов)", tag)
 			}
+
 			if !tagRegex.MatchString(tag) {
 				return fmt.Errorf("тег '%s' содержит недопустимые символы. Разрешены только буквы, цифры, пробелы, дефисы и подчеркивания", tag)
 			}
@@ -176,7 +210,6 @@ func (mw *MainWindow) createExperimentForm() *widget.Form {
 			{Text: "Теги", Widget: container.NewVBox(tagsEntry, tagsError)},
 		},
 		OnSubmit: func() {
-			// Проверяем все поля перед отправкой
 			if err := name.Validator(name.Text); err != nil {
 				showUserError(mw.window, "Ошибка в названии: "+err.Error())
 				return
@@ -227,8 +260,21 @@ func (mw *MainWindow) createExperimentForm() *widget.Form {
 // создание формы для добавления пользователя в эксперимент
 func (mw *MainWindow) createUserForm() *widget.Form {
 	experimentId := widget.NewEntry()
+	experimentId.SetPlaceHolder("Например: 1")
+
 	userId := widget.NewEntry()
+	userId.SetPlaceHolder("Например: user_123")
+
 	groupName := widget.NewSelect([]string{"A", "B"}, nil)
+
+	experimentIdHint := widget.NewLabel("Целое положительное число")
+	experimentIdHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	userIdHint := widget.NewLabel("Только буквы, цифры, дефисы и подчеркивания")
+	userIdHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	groupHint := widget.NewLabel("Группа A или B для A/B тестирования")
+	groupHint.TextStyle = fyne.TextStyle{Italic: true}
 
 	experimentIdError := widget.NewLabel("")
 	experimentIdError.Hide()
@@ -236,16 +282,24 @@ func (mw *MainWindow) createUserForm() *widget.Form {
 	userIdError.Hide()
 
 	experimentId.Validator = func(s string) error {
+		s = strings.TrimSpace(s)
 		if s == "" {
 			return fmt.Errorf("поле обязательно для заполнения")
 		}
+
+		if strings.HasPrefix(s, "-") {
+			return fmt.Errorf("число должно быть положительным")
+		}
+
 		val, err := strconv.Atoi(s)
 		if err != nil {
 			return fmt.Errorf("должно быть целым числом (например: 42)")
 		}
+
 		if val <= 0 {
 			return fmt.Errorf("значение должно быть положительным числом")
 		}
+
 		if val > 1000000 {
 			return fmt.Errorf("значение слишком большое (максимум 1000000)")
 		}
@@ -261,13 +315,15 @@ func (mw *MainWindow) createUserForm() *widget.Form {
 	}
 
 	userId.Validator = func(s string) error {
+		s = strings.TrimSpace(s)
 		if s == "" {
 			return fmt.Errorf("поле обязательно для заполнения")
 		}
+
 		if len(s) > 255 {
 			return fmt.Errorf("ID пользователя слишком длинный (максимум 255 символов)")
 		}
-		// Проверка на допустимые символы
+
 		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_\-]+$`, s); !matched {
 			return fmt.Errorf("ID пользователя может содержать только буквы, цифры, дефисы и подчеркивания")
 		}
@@ -339,9 +395,24 @@ func (mw *MainWindow) createUserForm() *widget.Form {
 // создание формы для добавления результатов тестирования
 func (mw *MainWindow) createResultForm() *widget.Form {
 	userId := widget.NewEntry()
+	userId.SetPlaceHolder("Например: 1")
+
 	recommendationId := widget.NewEntry()
+	recommendationId.SetPlaceHolder("Например: rec_456")
+
 	clicked := widget.NewCheck("Кликнут", nil)
+
 	rating := widget.NewEntry()
+	rating.SetPlaceHolder("0-5")
+
+	userIdHint := widget.NewLabel("Целое положительное число")
+	userIdHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	recommendationIdHint := widget.NewLabel("Только буквы, цифры, дефисы и подчеркивания")
+	recommendationIdHint.TextStyle = fyne.TextStyle{Italic: true}
+
+	ratingHint := widget.NewLabel("Целое число от 0 до 5 (обязательно при клике)")
+	ratingHint.TextStyle = fyne.TextStyle{Italic: true}
 
 	userIdError := widget.NewLabel("")
 	userIdError.Hide()
@@ -351,16 +422,24 @@ func (mw *MainWindow) createResultForm() *widget.Form {
 	ratingError.Hide()
 
 	userId.Validator = func(s string) error {
+		s = strings.TrimSpace(s)
 		if s == "" {
 			return fmt.Errorf("поле обязательно для заполнения")
 		}
+
+		if strings.HasPrefix(s, "-") {
+			return fmt.Errorf("число должно быть положительным")
+		}
+
 		val, err := strconv.Atoi(s)
 		if err != nil {
 			return fmt.Errorf("должно быть целым числом (например: 42)")
 		}
+
 		if val <= 0 {
 			return fmt.Errorf("значение должно быть положительным числом")
 		}
+
 		if val > 1000000 {
 			return fmt.Errorf("значение слишком большое (максимум 1000000)")
 		}
@@ -376,13 +455,15 @@ func (mw *MainWindow) createResultForm() *widget.Form {
 	}
 
 	recommendationId.Validator = func(s string) error {
+		s = strings.TrimSpace(s)
 		if s == "" {
 			return fmt.Errorf("поле обязательно для заполнения")
 		}
+
 		if len(s) > 255 {
 			return fmt.Errorf("ID рекомендации слишком длинный (максимум 255 символов)")
 		}
-		// Проверка на допустимые символы
+
 		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_\-]+$`, s); !matched {
 			return fmt.Errorf("ID рекомендации может содержать только буквы, цифры, дефисы и подчеркивания")
 		}
@@ -398,16 +479,28 @@ func (mw *MainWindow) createResultForm() *widget.Form {
 	}
 
 	rating.Validator = func(s string) error {
+		s = strings.TrimSpace(s)
+
 		if s == "" && clicked.Checked {
 			return fmt.Errorf("рейтинг обязателен при клике")
 		}
+
 		if s != "" {
+			if strings.HasPrefix(s, "-") {
+				return fmt.Errorf("рейтинг не может быть отрицательным")
+			}
+
 			val, err := strconv.Atoi(s)
 			if err != nil {
 				return fmt.Errorf("рейтинг должен быть целым числом от 0 до 5")
 			}
+
 			if val < 0 || val > 5 {
 				return fmt.Errorf("рейтинг должен быть от 0 до 5")
+			}
+
+			if clicked.Checked && val == 0 {
+				return fmt.Errorf("при клике рейтинг должен быть от 0 до 5")
 			}
 		}
 		return nil
