@@ -11,88 +11,88 @@ import (
 )
 
 type MainWindow struct {
-    app           fyne.App
-    window        fyne.Window
-    rep           *db.Repository
-    titleLabel    *widget.Label
-    subtitleLabel *widget.Label
+	app           fyne.App
+	window        fyne.Window
+	rep           *db.Repository
+	titleLabel    *widget.Label
+	subtitleLabel *widget.Label
 }
 
 func NewMainWindow(app fyne.App, rep *db.Repository) *MainWindow {
-    window := app.NewWindow("Testing Platform")
-    window.SetFixedSize(false)
-    window.Resize(fyne.NewSize(600, 400))
+	window := app.NewWindow("Testing Platform")
+	window.SetFixedSize(false)
+	window.Resize(fyne.NewSize(900, 600))
 
-    return &MainWindow{
-        app:    app,
-        window: window,
-        rep:    rep,
-    }
+	return &MainWindow{
+		app:    app,
+		window: window,
+		rep:    rep,
+	}
 }
 
 func (mw *MainWindow) CreateUI() {
-    createSchemaBtn := widget.NewButton("Создать схему и таблицы", mw.createSchemaHandler)
-    addDataBtn := widget.NewButton("Внести данные", mw.showDataInputDialog)
-    showDataBtn := widget.NewButton("Показать данные", mw.showDataDisplayWindow)
-    showSummaryBtn := widget.NewButton("Сводные данные", mw.showSummaryWindow)
+	createSchemaBtn := widget.NewButton("Создать схему и таблицы", mw.createSchemaHandler)
+	addDataBtn := widget.NewButton("Внести данные", mw.showDataInputDialog)
+	showDataBtn := widget.NewButton("Показать данные", mw.showDataDisplayWindow)
+	showSummaryBtn := widget.NewButton("Сводные данные", mw.showSummaryWindow)
 
-    mw.titleLabel = widget.NewLabel("А/В Testing Platform")
-    mw.titleLabel.Alignment = fyne.TextAlignCenter
-    mw.titleLabel.TextStyle = fyne.TextStyle{Bold: true}
-    mw.titleLabel.Wrapping = fyne.TextWrapOff // Отключаем перенос
+	mw.titleLabel = widget.NewLabel("А/В Testing Platform")
+	mw.titleLabel.Alignment = fyne.TextAlignCenter
+	mw.titleLabel.TextStyle = fyne.TextStyle{Bold: true}
+	mw.titleLabel.Wrapping = fyne.TextWrapOff // Отключаем перенос
 
-    mw.subtitleLabel = widget.NewLabel("Управление экспериментами А/В тестирования")
-    mw.subtitleLabel.Alignment = fyne.TextAlignCenter
-    mw.subtitleLabel.Wrapping = fyne.TextWrapOff // Отключаем перенос
+	mw.subtitleLabel = widget.NewLabel("Управление экспериментами А/В тестирования")
+	mw.subtitleLabel.Alignment = fyne.TextAlignCenter
+	mw.subtitleLabel.Wrapping = fyne.TextWrapOff // Отключаем перенос
 
-    // Создаем контейнер для кнопок
-    buttonsContainer := container.NewVBox(
-        layout.NewSpacer(),
-        createSchemaBtn,
-        addDataBtn,
-        showDataBtn,
-        showSummaryBtn,
-        layout.NewSpacer(),
-    )
+	// Создаем контейнер для кнопок
+	buttonsContainer := container.NewVBox(
+		layout.NewSpacer(),
+		createSchemaBtn,
+		addDataBtn,
+		showDataBtn,
+		showSummaryBtn,
+		layout.NewSpacer(),
+	)
 
-    // Основной контент
-    mainContent := container.NewVBox(
-        container.NewCenter(mw.titleLabel),
-        container.NewCenter(mw.subtitleLabel),
-        widget.NewSeparator(),
-        buttonsContainer,
-    )
+	// Основной контент
+	mainContent := container.NewVBox(
+		container.NewCenter(mw.titleLabel),
+		container.NewCenter(mw.subtitleLabel),
+		widget.NewSeparator(),
+		buttonsContainer,
+	)
 
-    // Добавляем отступы и возможность прокрутки
-    paddedContent := container.NewBorder(
-        layout.NewSpacer(), layout.NewSpacer(),
-        layout.NewSpacer(), layout.NewSpacer(),
-        mainContent,
-    )
+	// Добавляем отступы и возможность прокрутки
+	paddedContent := container.NewBorder(
+		layout.NewSpacer(), layout.NewSpacer(),
+		layout.NewSpacer(), layout.NewSpacer(),
+		mainContent,
+	)
 
-    mw.window.SetContent(container.NewVScroll(paddedContent))
+	mw.window.SetContent(container.NewVScroll(paddedContent))
 
-    // Обработчик изменения размера окна
-    mw.window.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
-        if e.Name == fyne.KeyR {
-            mw.updateLayout()
-        }
-    })
+	// Обработчик изменения размера окна
+	mw.window.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
+		if e.Name == fyne.KeyR {
+			mw.updateLayout()
+		}
+	})
 }
 
 func (mw *MainWindow) updateLayout() {
-    size := mw.window.Canvas().Size()
+	size := mw.window.Canvas().Size()
 
-    // Адаптируем текст для разных размеров экрана
-    if size.Width < 400 {
-        mw.titleLabel.SetText("А/В Testing")
-    } else {
-        mw.titleLabel.SetText("А/В Testing Platform")
-    }
+	// Адаптируем текст для разных размеров экрана
+	if size.Width < 400 {
+		mw.titleLabel.SetText("А/В Testing")
+	} else {
+		mw.titleLabel.SetText("А/В Testing Platform")
+	}
 }
 
 func (mw *MainWindow) Show() {
-    mw.window.Show()
+	mw.window.Show()
 	mw.ShowInstructionDialog()
 }
 
