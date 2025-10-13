@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing-platform/db"
 	"testing-platform/db/models"
@@ -19,27 +20,47 @@ type AdvancedQueryWindow struct {
 	mainWindow fyne.Window
 
 	// Элементы SELECT
-	tableSelect  *widget.Select
-	columnList   *widget.CheckGroup
-	whereClause  *widget.Entry
-	orderBy      *widget.Entry
-	groupBy      *widget.Entry
-	havingClause *widget.Entry
-	limitInput   *widget.Entry
+	tableSelect      *widget.Select
+	columnList       *widget.CheckGroup
+	whereContainer   *fyne.Container // Контейнер для условий WHERE
+	orderByContainer *fyne.Container // Контейнер для ORDER BY условий
+	groupByList      *widget.Select  // Список для GROUP BY
+	havingContainer  *fyne.Container // Контейнер для HAVING
+	limitSlider      *widget.Slider  // Слайдер для LIMIT
+	limitLabel       *widget.Label   // Отображение значения LIMIT
 
 	// Результаты
 	resultTable *widget.Table
 	resultLabel *widget.Label
 	sqlPreview  *widget.Entry
 
-	currentColumns []models.ColumnInfo
+	currentColumns    []models.ColumnInfo
+	whereConditions   []WhereCondition   // Хранение условий WHERE
+	orderByConditions []OrderByCondition // Хранение условий ORDER BY
+	havingConditions  []WhereCondition   // Хранение условий HAVING
+}
+
+// Структура для хранения условий WHERE/HAVING
+type WhereCondition struct {
+	Column   string
+	Operator string
+	Value    string
+}
+
+// Структура для хранения условий ORDER BY
+type OrderByCondition struct {
+	Column    string
+	Direction string
 }
 
 func NewAdvancedQueryWindow(repo *db.Repository, mainWindow fyne.Window) *AdvancedQueryWindow {
 	a := &AdvancedQueryWindow{
-		repository: repo,
-		mainWindow: mainWindow,
-		window:     fyne.CurrentApp().NewWindow("Расширенный SELECT"),
+		repository:        repo,
+		mainWindow:        mainWindow,
+		window:            fyne.CurrentApp().NewWindow("Расширенный SELECT"),
+		whereConditions:   []WhereCondition{},
+		orderByConditions: []OrderByCondition{},
+		havingConditions:  []WhereCondition{},
 	}
 
 	a.buildUI()
@@ -54,21 +75,22 @@ func (a *AdvancedQueryWindow) buildUI() {
 	a.columnList = widget.NewCheckGroup([]string{}, nil)
 	a.columnList.Horizontal = false
 
-	a.whereClause = widget.NewEntry()
-	a.whereClause.SetPlaceHolder("WHERE условие (age > 18 AND name = 'John')")
+	// Инициализация контейнеров для условий
+	a.whereContainer = container.NewVBox()
+	a.orderByContainer = container.NewVBox()
+	a.havingContainer = container.NewVBox()
 
-	a.orderBy = widget.NewEntry()
-	a.orderBy.SetPlaceHolder("ORDER BY (name ASC, age DESC)")
+	// GROUP BY элементы
+	a.groupByList = widget.NewSelect([]string{}, nil)
+	a.groupByList.PlaceHolder = "Выберите столбец для группировки"
 
-	a.groupBy = widget.NewEntry()
-	a.groupBy.SetPlaceHolder("GROUP BY (department, year)")
-
-	a.havingClause = widget.NewEntry()
-	a.havingClause.SetPlaceHolder("HAVING (COUNT(*) > 5)")
-
-	a.limitInput = widget.NewEntry()
-	a.limitInput.SetPlaceHolder("LIMIT (100)")
-	a.limitInput.SetText("100")
+	// LIMIT элементы
+	a.limitSlider = widget.NewSlider(1, 1000)
+	a.limitSlider.SetValue(100)
+	a.limitLabel = widget.NewLabel("LIMIT: 100")
+	a.limitSlider.OnChanged = func(value float64) {
+		a.limitLabel.SetText(fmt.Sprintf("LIMIT: %d", int(value)))
+	}
 
 	a.sqlPreview = widget.NewMultiLineEntry()
 	a.sqlPreview.Wrapping = fyne.TextWrapOff
@@ -82,11 +104,13 @@ func (a *AdvancedQueryWindow) buildUI() {
 		func() fyne.CanvasObject { return widget.NewLabel("") },
 		func(i widget.TableCellID, o fyne.CanvasObject) {},
 	)
-	a.resultTable.SetColumnWidth(0, 150)
 
-	// Кнопки
+	// Кнопки для управления условиями
+	addWhereBtn := widget.NewButton("Добавить условие WHERE", a.addWhereCondition)
+	addOrderByBtn := widget.NewButton("Добавить сортировку ORDER BY", a.addOrderByCondition)
+	addHavingBtn := widget.NewButton("Добавить условие HAVING", a.addHavingCondition)
 	executeBtn := widget.NewButton("Выполнить запрос", a.executeQuery)
-	clearBtn := widget.NewButton("Очистить", a.clearForm)
+	clearBtn := widget.NewButton("Очистить всё", a.clearForm)
 	showSQLBtn := widget.NewButton("Показать SQL", a.previewSQL)
 
 	// Компоновка
@@ -97,20 +121,34 @@ func (a *AdvancedQueryWindow) buildUI() {
 		container.NewScroll(a.columnList),
 	)
 
-	rightPanel := container.NewVBox(
-		widget.NewLabel("WHERE:"),
-		a.whereClause,
-		widget.NewLabel("ORDER BY:"),
-		a.orderBy,
+	conditionsPanel := container.NewVBox(
+		widget.NewLabel("Условия WHERE:"),
+		a.whereContainer,
+		addWhereBtn,
+		widget.NewSeparator(),
+		widget.NewLabel("Сортировка ORDER BY:"),
+		a.orderByContainer,
+		addOrderByBtn,
+		widget.NewSeparator(),
 		widget.NewLabel("GROUP BY:"),
-		a.groupBy,
-		widget.NewLabel("HAVING:"),
-		a.havingClause,
-		widget.NewLabel("LIMIT:"),
-		a.limitInput,
-		container.NewHBox(executeBtn, showSQLBtn, clearBtn),
+		a.groupByList,
+		widget.NewLabel("Условия HAVING:"),
+		a.havingContainer,
+		addHavingBtn,
+		widget.NewSeparator(),
+		a.limitLabel,
+		a.limitSlider,
 	)
 
+	// Создаем HBox для кнопок
+	buttonsContainer := container.NewHBox(executeBtn, showSQLBtn, clearBtn)
+
+	rightPanel := container.NewVBox(
+		conditionsPanel,
+		buttonsContainer,
+	)
+
+	// Создаем HBox для основного расположения
 	controls := container.NewHBox(leftPanel, rightPanel)
 
 	content := container.NewBorder(
@@ -121,7 +159,188 @@ func (a *AdvancedQueryWindow) buildUI() {
 	)
 
 	a.window.SetContent(content)
-	a.window.Resize(fyne.NewSize(900, 700))
+	a.window.Resize(fyne.NewSize(1000, 800))
+}
+
+func (a *AdvancedQueryWindow) addWhereCondition() {
+	a.addCondition(a.whereContainer, &a.whereConditions, "WHERE")
+}
+
+func (a *AdvancedQueryWindow) addOrderByCondition() {
+	a.addOrderBy()
+}
+
+func (a *AdvancedQueryWindow) addHavingCondition() {
+	a.addCondition(a.havingContainer, &a.havingConditions, "HAVING")
+}
+
+func (a *AdvancedQueryWindow) addCondition(cont *fyne.Container, conditions *[]WhereCondition, conditionType string) {
+	// Создаем элементы для одного условия
+	columnSelect := widget.NewSelect([]string{}, nil)
+	columnSelect.PlaceHolder = "Столбец"
+
+	// Если столбцы уже загружены, обновляем список
+	if len(a.currentColumns) > 0 {
+		columnSelect.Options = a.getColumnNames()
+		columnSelect.Refresh()
+	}
+
+	operatorSelect := widget.NewSelect([]string{
+		"=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE",
+		"IN", "NOT IN", "IS NULL", "IS NOT NULL",
+	}, nil)
+	operatorSelect.SetSelected("=")
+
+	valueEntry := widget.NewEntry()
+	valueEntry.SetPlaceHolder("Значение")
+
+	// Кнопка удаления условия
+	deleteBtn := widget.NewButton("✕", nil)
+
+	// Создаем HBox для строки условия
+	conditionRow := container.NewHBox(
+		columnSelect,
+		operatorSelect,
+		valueEntry,
+		deleteBtn,
+	)
+
+	// Создаем условие
+	condition := WhereCondition{}
+	*conditions = append(*conditions, condition)
+	conditionIndex := len(*conditions) - 1
+
+	// Обновляем условие при изменении полей
+	updateCondition := func() {
+		if conditionIndex < len(*conditions) {
+			(*conditions)[conditionIndex] = WhereCondition{
+				Column:   columnSelect.Selected,
+				Operator: operatorSelect.Selected,
+				Value:    valueEntry.Text,
+			}
+		}
+	}
+
+	columnSelect.OnChanged = func(s string) { updateCondition() }
+	operatorSelect.OnChanged = func(s string) { updateCondition() }
+	valueEntry.OnChanged = func(s string) { updateCondition() }
+
+	// Настраиваем кнопку удаления
+	deleteBtn.OnTapped = func() {
+		if conditionIndex < len(*conditions) {
+			// Удаляем условие из слайса
+			*conditions = append((*conditions)[:conditionIndex], (*conditions)[conditionIndex+1:]...)
+			// Удаляем строку из контейнера
+			cont.Remove(conditionRow)
+		}
+	}
+
+	cont.Add(conditionRow)
+}
+
+func (a *AdvancedQueryWindow) addOrderBy() {
+	// Создаем элементы для сортировки
+	columnSelect := widget.NewSelect([]string{}, nil)
+	columnSelect.PlaceHolder = "Столбец"
+
+	// Если столбцы уже загружены, обновляем список
+	if len(a.currentColumns) > 0 {
+		columnSelect.Options = a.getColumnNames()
+		columnSelect.Refresh()
+	}
+
+	directionSelect := widget.NewSelect([]string{
+		"По возрастанию (ASC)",
+		"По убыванию (DESC)",
+		"Случайно (RANDOM)",
+		"По длине строки (LENGTH)",
+		"Без учета регистра (CASE INSENSITIVE)",
+	}, nil)
+	directionSelect.SetSelected("По возрастанию (ASC)")
+
+	// Кнопка удаления условия
+	deleteBtn := widget.NewButton("✕", nil)
+
+	// Создаем HBox для строки сортировки
+	orderByRow := container.NewHBox(
+		columnSelect,
+		directionSelect,
+		deleteBtn,
+	)
+
+	// Создаем условие
+	condition := OrderByCondition{}
+	a.orderByConditions = append(a.orderByConditions, condition)
+	conditionIndex := len(a.orderByConditions) - 1
+
+	// Обновляем условие при изменении полей
+	updateCondition := func() {
+		if conditionIndex < len(a.orderByConditions) {
+			// Преобразуем понятное название в SQL направление
+			direction := a.getSQLDirection(directionSelect.Selected)
+			a.orderByConditions[conditionIndex] = OrderByCondition{
+				Column:    columnSelect.Selected,
+				Direction: direction,
+			}
+		}
+	}
+
+	columnSelect.OnChanged = func(s string) { updateCondition() }
+	directionSelect.OnChanged = func(s string) { updateCondition() }
+
+	// Настраиваем кнопку удаления
+	deleteBtn.OnTapped = func() {
+		if conditionIndex < len(a.orderByConditions) {
+			// Удаляем условие из слайса
+			a.orderByConditions = append(a.orderByConditions[:conditionIndex], a.orderByConditions[conditionIndex+1:]...)
+			// Удаляем строку из контейнера
+			a.orderByContainer.Remove(orderByRow)
+		}
+	}
+
+	a.orderByContainer.Add(orderByRow)
+}
+
+// Преобразует понятное название направления в SQL синтаксис
+func (a *AdvancedQueryWindow) getSQLDirection(displayDirection string) string {
+	switch displayDirection {
+	case "По убыванию (DESC)":
+		return "DESC"
+	case "Случайно (RANDOM)":
+		return "RANDOM()"
+	case "По длине строки (LENGTH)":
+		return "LENGTH"
+	case "Без учета регистра (CASE INSENSITIVE)":
+		return "COLLATE NOCASE"
+	default: // "По возрастанию (ASC)"
+		return "ASC"
+	}
+}
+
+// Форматирует условие ORDER BY для SQL запроса
+func (a *AdvancedQueryWindow) formatOrderByCondition(condition OrderByCondition) string {
+	if condition.Column == "" {
+		return ""
+	}
+
+	switch condition.Direction {
+	case "RANDOM()":
+		return "RANDOM()"
+	case "LENGTH":
+		return fmt.Sprintf("LENGTH(%s)", condition.Column)
+	case "COLLATE NOCASE":
+		return fmt.Sprintf("%s COLLATE NOCASE", condition.Column)
+	default:
+		return fmt.Sprintf("%s %s", condition.Column, condition.Direction)
+	}
+}
+
+func (a *AdvancedQueryWindow) getColumnNames() []string {
+	var names []string
+	for _, col := range a.currentColumns {
+		names = append(names, col.Name)
+	}
+	return names
 }
 
 func (a *AdvancedQueryWindow) loadTables() {
@@ -151,9 +370,57 @@ func (a *AdvancedQueryWindow) onTableSelected(table string) {
 		columnNames = append(columnNames, col.Name)
 	}
 
+	// Обновляем списки выбора
 	a.columnList.Options = columnNames
 	a.columnList.Selected = columnNames // Выбираем все по умолчанию
 	a.columnList.Refresh()
+
+	a.groupByList.Options = columnNames
+	a.groupByList.Refresh()
+
+	// Обновляем существующие условия
+	a.updateExistingConditions()
+}
+
+// Метод для обновления существующих условий
+func (a *AdvancedQueryWindow) updateExistingConditions() {
+	columnNames := a.getColumnNames()
+
+	// Обновляем условия WHERE
+	for i := range a.whereConditions {
+		if i < len(a.whereContainer.Objects) {
+			if conditionRow, ok := a.whereContainer.Objects[i].(*fyne.Container); ok {
+				if columnSelect, ok := conditionRow.Objects[0].(*widget.Select); ok {
+					columnSelect.Options = columnNames
+					columnSelect.Refresh()
+				}
+			}
+		}
+	}
+
+	// Обновляем условия ORDER BY
+	for i := range a.orderByConditions {
+		if i < len(a.orderByContainer.Objects) {
+			if orderByRow, ok := a.orderByContainer.Objects[i].(*fyne.Container); ok {
+				if columnSelect, ok := orderByRow.Objects[0].(*widget.Select); ok {
+					columnSelect.Options = columnNames
+					columnSelect.Refresh()
+				}
+			}
+		}
+	}
+
+	// Обновляем условия HAVING
+	for i := range a.havingConditions {
+		if i < len(a.havingContainer.Objects) {
+			if conditionRow, ok := a.havingContainer.Objects[i].(*fyne.Container); ok {
+				if columnSelect, ok := conditionRow.Objects[0].(*widget.Select); ok {
+					columnSelect.Options = columnNames
+					columnSelect.Refresh()
+				}
+			}
+		}
+	}
 }
 
 func (a *AdvancedQueryWindow) buildQuery() string {
@@ -172,32 +439,91 @@ func (a *AdvancedQueryWindow) buildQuery() string {
 
 	query := fmt.Sprintf("SELECT %s FROM %s", selectedColumns, table)
 
-	// WHERE
-	if strings.TrimSpace(a.whereClause.Text) != "" {
-		query += " WHERE " + a.whereClause.Text
+	// WHERE условия
+	whereClause := a.buildConditions(a.whereConditions)
+	if whereClause != "" {
+		query += " WHERE " + whereClause
 	}
 
 	// GROUP BY
-	if strings.TrimSpace(a.groupBy.Text) != "" {
-		query += " GROUP BY " + a.groupBy.Text
+	if a.groupByList.Selected != "" {
+		query += " GROUP BY " + a.groupByList.Selected
 	}
 
-	// HAVING
-	if strings.TrimSpace(a.havingClause.Text) != "" {
-		query += " HAVING " + a.havingClause.Text
+	// HAVING условия
+	havingClause := a.buildConditions(a.havingConditions)
+	if havingClause != "" {
+		query += " HAVING " + havingClause
 	}
 
-	// ORDER BY
-	if strings.TrimSpace(a.orderBy.Text) != "" {
-		query += " ORDER BY " + a.orderBy.Text
+	// ORDER BY условия
+	orderByClause := a.buildOrderByConditions()
+	if orderByClause != "" {
+		query += " ORDER BY " + orderByClause
 	}
 
 	// LIMIT
-	if strings.TrimSpace(a.limitInput.Text) != "" {
-		query += " LIMIT " + a.limitInput.Text
+	limitValue := int(a.limitSlider.Value)
+	if limitValue > 0 {
+		query += " LIMIT " + strconv.Itoa(limitValue)
 	}
 
 	return query
+}
+
+func (a *AdvancedQueryWindow) buildConditions(conditions []WhereCondition) string {
+	if len(conditions) == 0 {
+		return ""
+	}
+
+	var conditionStrings []string
+	for _, cond := range conditions {
+		if cond.Column == "" || cond.Operator == "" {
+			continue
+		}
+
+		// Форматируем значение в зависимости от оператора
+		var valueStr string
+		switch cond.Operator {
+		case "IS NULL", "IS NOT NULL":
+			valueStr = "" // Эти операторы не требуют значения
+		case "IN", "NOT IN":
+			// Предполагаем, что значение - это список, разделенный запятыми
+			valueStr = "(" + cond.Value + ")"
+		default:
+			// Для строковых значений добавляем кавычки
+			if _, err := strconv.Atoi(cond.Value); err != nil {
+				// Если не число, обрамляем кавычками
+				valueStr = "'" + cond.Value + "'"
+			} else {
+				valueStr = cond.Value
+			}
+		}
+
+		conditionStr := cond.Column + " " + cond.Operator
+		if valueStr != "" {
+			conditionStr += " " + valueStr
+		}
+		conditionStrings = append(conditionStrings, conditionStr)
+	}
+
+	return strings.Join(conditionStrings, " AND ")
+}
+
+func (a *AdvancedQueryWindow) buildOrderByConditions() string {
+	if len(a.orderByConditions) == 0 {
+		return ""
+	}
+
+	var orderByStrings []string
+	for _, cond := range a.orderByConditions {
+		if cond.Column == "" {
+			continue
+		}
+		orderByStrings = append(orderByStrings, a.formatOrderByCondition(cond))
+	}
+
+	return strings.Join(orderByStrings, ", ")
 }
 
 func (a *AdvancedQueryWindow) executeQuery() {
@@ -274,17 +600,27 @@ func (a *AdvancedQueryWindow) previewSQL() {
 }
 
 func (a *AdvancedQueryWindow) clearForm() {
+	// Сбрасываем все элементы формы
 	a.tableSelect.SetSelected("")
 	a.columnList.Selected = []string{}
-	a.whereClause.SetText("")
-	a.orderBy.SetText("")
-	a.groupBy.SetText("")
-	a.havingClause.SetText("")
-	a.limitInput.SetText("100")
+	a.whereContainer.Objects = nil
+	a.orderByContainer.Objects = nil
+	a.havingContainer.Objects = nil
+	a.groupByList.SetSelected("")
+	a.limitSlider.SetValue(100)
+	a.limitLabel.SetText("LIMIT: 100")
 	a.sqlPreview.SetText("")
 	a.resultLabel.SetText("")
 	a.resultTable.Length = func() (int, int) { return 0, 0 }
 	a.resultTable.Refresh()
+
+	// Очищаем условия
+	a.whereConditions = []WhereCondition{}
+	a.orderByConditions = []OrderByCondition{}
+	a.havingConditions = []WhereCondition{}
+
+	// Очищаем текущие столбцы
+	a.currentColumns = []models.ColumnInfo{}
 }
 
 func (a *AdvancedQueryWindow) showError(err error) {
