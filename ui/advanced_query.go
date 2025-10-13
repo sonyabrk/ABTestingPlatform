@@ -564,7 +564,7 @@ func (a *AdvancedQueryWindow) displayResults(result *models.QueryResult) {
 
 	// Настройка таблицы
 	a.resultTable.Length = func() (int, int) {
-		return len(result.Rows) + 1, len(result.Columns) // +1 для заголовков
+		return len(result.Rows) + 1, len(result.Columns)
 	}
 
 	a.resultTable.UpdateCell = func(id widget.TableCellID, obj fyne.CanvasObject) {
@@ -600,7 +600,6 @@ func (a *AdvancedQueryWindow) previewSQL() {
 }
 
 func (a *AdvancedQueryWindow) clearForm() {
-	// Сбрасываем все элементы формы
 	a.tableSelect.SetSelected("")
 	a.columnList.Selected = []string{}
 	a.whereContainer.Objects = nil
@@ -614,12 +613,10 @@ func (a *AdvancedQueryWindow) clearForm() {
 	a.resultTable.Length = func() (int, int) { return 0, 0 }
 	a.resultTable.Refresh()
 
-	// Очищаем условия
 	a.whereConditions = []WhereCondition{}
 	a.orderByConditions = []OrderByCondition{}
 	a.havingConditions = []WhereCondition{}
 
-	// Очищаем текущие столбцы
 	a.currentColumns = []models.ColumnInfo{}
 }
 
