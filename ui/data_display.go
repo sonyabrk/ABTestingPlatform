@@ -14,13 +14,38 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func (mw *MainWindow) showDataDisplayWindow() {
-	// создание окна
-	dataWin := mw.app.NewWindow("Данные экспериментов")
-	dataWin.Resize(fyne.NewSize(1000, 700)) // Увеличили высоту для размещения фильтров
+// DataDisplayWindow представляет окно отображения данных
+type DataDisplayWindow struct {
+	window         fyne.Window
+	mainWindow     *MainWindow
+	tableContainer *fyne.Container
+	filterPanel    *fyne.Container
+}
 
+// NewDataDisplayWindow создает новое окно отображения данных
+func NewDataDisplayWindow(mw *MainWindow) *DataDisplayWindow {
+	d := &DataDisplayWindow{
+		mainWindow: mw,
+		window:     mw.app.NewWindow("Данные экспериментов"),
+	}
+	
+	d.window.Resize(fyne.NewSize(1000, 700))
+	d.buildUI()
+	
+	// Добавляем окно в список открытых окон главного окна
+	mw.addDataWindow(d)
+	
+	// Устанавливаем обработчик закрытия окна
+	d.window.SetOnClosed(func() {
+		mw.removeDataWindow(d)
+	})
+	
+	return d
+}
+
+func (d *DataDisplayWindow) buildUI() {
 	// создание контейнера для таблицы
-	tableContainer := container.NewStack()
+	d.tableContainer = container.NewStack()
 
 	// Элементы управления для фильтра (выпадающие списки и поля ввода)
 	algorithmA := widget.NewSelect([]string{"", "collaborative", "content_based", "hybrid", "popularity_based"}, nil)
@@ -32,9 +57,6 @@ func (mw *MainWindow) showDataDisplayWindow() {
 	// Устанавливаем плейсхолдеры для полей дат
 	dateFrom.SetPlaceHolder("YYYY-MM-DD")
 	dateTo.SetPlaceHolder("YYYY-MM-DD")
-
-	// Сначала объявляем переменную для функции updateTable
-	var updateTable func(filter models.ExperimentFilter)
 
 	// Функция применения фильтра
 	applyFilter := func() {
@@ -63,7 +85,7 @@ func (mw *MainWindow) showDataDisplayWindow() {
 			}
 		}
 
-		updateTable(filter)
+		d.updateTable(filter)
 	}
 
 	// Функция очистки фильтров
@@ -73,82 +95,16 @@ func (mw *MainWindow) showDataDisplayWindow() {
 		isActive.SetChecked(false)
 		dateFrom.SetText("")
 		dateTo.SetText("")
-		updateTable(models.ExperimentFilter{})
+		d.updateTable(models.ExperimentFilter{})
 	}
 
-	// Теперь определяем функцию updateTable
-	updateTable = func(filter models.ExperimentFilter) {
-		ctx := context.Background()
-		experiments, err := mw.rep.GetExperiments(ctx, filter)
-		if err != nil {
-			logger.Error("Ошибка получения экспериментов: %v", err)
-			dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), dataWin)
-			return
-		}
-
-		// подготовка данных для таблицы
-		data := make([][]string, 0)
-		for _, exp := range experiments {
-			data = append(data, []string{
-				fmt.Sprintf("%d", exp.ID),
-				exp.Name,
-				exp.AlgorithmA,
-				exp.AlgorithmB,
-				fmt.Sprintf("%.2f", exp.UserPercent),
-				exp.StartDate.Format("2006-01-02"),
-				fmt.Sprintf("%t", exp.IsActive),
-				strings.Join(exp.Tags, ", "),
-			})
-		}
-
-		// создание новой таблицы
-		table := widget.NewTable(
-			func() (int, int) {
-				return len(data) + 1, 8
-			},
-			func() fyne.CanvasObject {
-				// Создаем label с выравниванием по центру
-				label := widget.NewLabel("")
-				label.Alignment = fyne.TextAlignCenter
-				return label
-			},
-			func(i widget.TableCellID, o fyne.CanvasObject) {
-				label := o.(*widget.Label)
-				label.Alignment = fyne.TextAlignCenter // Выравнивание по центру
-
-				// 1ая строка - заголовки
-				if i.Row == 0 {
-					headers := []string{"ID", "Название", "Алгоритм A", "Алгоритм B", "Пользователи %", "Дата начала", "Активен", "Теги"}
-					if i.Col < len(headers) {
-						label.SetText(headers[i.Col])
-						label.TextStyle = fyne.TextStyle{Bold: true}
-					}
-				} else {
-					// смещение данных на одну строку вниз
-					if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
-						label.SetText(data[i.Row-1][i.Col])
-						label.TextStyle = fyne.TextStyle{}
-					}
-				}
-			})
-
-		// установка размеров столбцов
-		table.SetColumnWidth(0, 60)  // ID
-		table.SetColumnWidth(1, 160) // Name
-		table.SetColumnWidth(2, 130) // Algorithm A
-		table.SetColumnWidth(3, 130) // Algorithm B
-		table.SetColumnWidth(4, 130) // User Percent
-		table.SetColumnWidth(5, 120) // Start Date
-		table.SetColumnWidth(6, 90)  // Is Active
-		table.SetColumnWidth(7, 160) // Tags
-
-		// обновление контейнера с таблицей
-		tableContainer.Objects = []fyne.CanvasObject{table}
-		tableContainer.Refresh()
-	}
+	// Кнопка обновления данных
+	refreshBtn := widget.NewButton("Обновить данные", func() {
+		d.refreshData()
+	})
 
 	// Создаем панель фильтров
-	filterPanel := container.NewVBox(
+	d.filterPanel = container.NewVBox(
 		widget.NewLabel("Фильтры:"),
 		container.NewHBox(
 			container.NewVBox(
@@ -175,33 +131,119 @@ func (mw *MainWindow) showDataDisplayWindow() {
 		container.NewHBox(
 			widget.NewButton("Применить фильтр", applyFilter),
 			widget.NewButton("Очистить фильтры", clearFilters),
+			refreshBtn,
 		),
 	)
 
 	// Добавляем отступы для лучшего вида
-	filterPanel = container.NewPadded(filterPanel)
+	d.filterPanel = container.NewPadded(d.filterPanel)
 
 	// кнопка закрытия
 	closeBtn := widget.NewButton("Закрыть", func() {
-		dataWin.Close()
+		d.window.Close()
 	})
 
 	// первоначальная загрузка данных
-	updateTable(models.ExperimentFilter{})
+	d.updateTable(models.ExperimentFilter{})
 
 	// создание основного контейнера
 	content := container.NewBorder(
-		filterPanel,                 // верхняя панель с фильтрами
+		d.filterPanel,                 // верхняя панель с фильтрами
 		container.NewHBox(closeBtn), // нижняя панель с кнопкой закрытия
 		nil, nil,
-		tableContainer, // центральная область с таблицей
+		d.tableContainer, // центральная область с таблицей
 	)
 
-	dataWin.SetContent(content)
+	d.window.SetContent(content)
+}
+
+// Обновление данных в таблице
+func (d *DataDisplayWindow) refreshData() {
+	d.updateTable(models.ExperimentFilter{})
+	dialog.ShowInformation("Обновлено", "Данные успешно обновлены", d.window)
+}
+
+func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
+	ctx := context.Background()
+	experiments, err := d.mainWindow.rep.GetExperiments(ctx, filter)
+	if err != nil {
+		logger.Error("Ошибка получения экспериментов: %v", err)
+		dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), d.window)
+		return
+	}
+
+	// подготовка данных для таблицы
+	data := make([][]string, 0)
+	for _, exp := range experiments {
+		data = append(data, []string{
+			fmt.Sprintf("%d", exp.ID),
+			exp.Name,
+			exp.AlgorithmA,
+			exp.AlgorithmB,
+			fmt.Sprintf("%.2f", exp.UserPercent),
+			exp.StartDate.Format("2006-01-02"),
+			fmt.Sprintf("%t", exp.IsActive),
+			strings.Join(exp.Tags, ", "),
+		})
+	}
+
+	// создание новой таблицы
+	table := widget.NewTable(
+		func() (int, int) {
+			return len(data) + 1, 8
+		},
+		func() fyne.CanvasObject {
+			// Создаем label с выравниванием по центру
+			label := widget.NewLabel("")
+			label.Alignment = fyne.TextAlignCenter
+			return label
+		},
+		func(i widget.TableCellID, o fyne.CanvasObject) {
+			label := o.(*widget.Label)
+			label.Alignment = fyne.TextAlignCenter // Выравнивание по центру
+
+			// 1ая строка - заголовки
+			if i.Row == 0 {
+				headers := []string{"ID", "Название", "Алгоритм A", "Алгоритм B", "Пользователи %", "Дата начала", "Активен", "Теги"}
+				if i.Col < len(headers) {
+					label.SetText(headers[i.Col])
+					label.TextStyle = fyne.TextStyle{Bold: true}
+				}
+			} else {
+				// смещение данных на одну строку вниз
+				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
+					label.SetText(data[i.Row-1][i.Col])
+					label.TextStyle = fyne.TextStyle{}
+				}
+			}
+		})
+
+	// установка размеров столбцов
+	table.SetColumnWidth(0, 60)  // ID
+	table.SetColumnWidth(1, 160) // Name
+	table.SetColumnWidth(2, 130) // Algorithm A
+	table.SetColumnWidth(3, 130) // Algorithm B
+	table.SetColumnWidth(4, 130) // User Percent
+	table.SetColumnWidth(5, 120) // Start Date
+	table.SetColumnWidth(6, 90)  // Is Active
+	table.SetColumnWidth(7, 160) // Tags
+
+	// обновление контейнера с таблицей
+	d.tableContainer.Objects = []fyne.CanvasObject{table}
+	d.tableContainer.Refresh()
+}
+
+func (d *DataDisplayWindow) Show() {
+	d.window.Show()
+}
+
+// Обновленная функция showDataDisplayWindow в MainWindow
+func (mw *MainWindow) showDataDisplayWindow() {
+	dataWin := NewDataDisplayWindow(mw)
 	dataWin.Show()
 }
 
-// функция создает и отображает окно со сводными данными экспериментов
+// Обновленная функция showSummaryWindow в MainWindow
 func (mw *MainWindow) showSummaryWindow() {
 	// создание нового окна
 	summaryWin := mw.app.NewWindow("Сводные данные экспериментов")
@@ -274,9 +316,16 @@ func (mw *MainWindow) showSummaryWindow() {
 	closeBtn := widget.NewButton("Закрыть", func() {
 		summaryWin.Close()
 	})
+	
+	// кнопка обновления
+	refreshBtn := widget.NewButton("Обновить", func() {
+		// Закрываем и открываем заново для обновления данных
+		summaryWin.Close()
+		mw.showSummaryWindow()
+	})
 
 	// создание контейнера с таблицей и кнопкой
-	content := container.NewBorder(nil, closeBtn, nil, nil, table)
+	content := container.NewBorder(nil, container.NewHBox(refreshBtn, closeBtn), nil, nil, table)
 	summaryWin.SetContent(content)
 	summaryWin.Show()
 }

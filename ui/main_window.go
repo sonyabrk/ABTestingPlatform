@@ -16,6 +16,10 @@ type MainWindow struct {
 	rep           *db.Repository
 	titleLabel    *widget.Label
 	subtitleLabel *widget.Label
+
+	// Для отслеживания открытых окон
+	openDataWindows    []*DataDisplayWindow
+	openSummaryWindows []fyne.Window
 }
 
 func NewMainWindow(app fyne.App, rep *db.Repository) *MainWindow {
@@ -24,9 +28,11 @@ func NewMainWindow(app fyne.App, rep *db.Repository) *MainWindow {
 	window.Resize(fyne.NewSize(900, 600))
 
 	return &MainWindow{
-		app:    app,
-		window: window,
-		rep:    rep,
+		app:                app,
+		window:             window,
+		rep:                rep,
+		openDataWindows:    make([]*DataDisplayWindow, 0),
+		openSummaryWindows: make([]fyne.Window, 0),
 	}
 }
 
@@ -144,8 +150,42 @@ func (mw *MainWindow) createMenu() *fyne.MainMenu {
 
 // Методы для открытия новых окон
 func (mw *MainWindow) showAlterTable() {
-	alterWin := NewAlterTableWindow(mw.rep, mw.window)
+	alterWin := NewAlterTableWindow(mw.rep, mw.window, func() {
+		// Callback для обновления главного окна после изменений в таблице
+		mw.showSuccessMessage("Структура таблицы успешно изменена")
+
+		// Обновляем все открытые окна данных
+		mw.refreshAllDataWindows()
+	})
 	alterWin.Show()
+}
+
+// Обновление всех открытых окон данных
+func (mw *MainWindow) refreshAllDataWindows() {
+	for _, dataWin := range mw.openDataWindows {
+		dataWin.refreshData()
+	}
+}
+
+// Добавление окна данных в список отслеживаемых
+func (mw *MainWindow) addDataWindow(window *DataDisplayWindow) {
+	mw.openDataWindows = append(mw.openDataWindows, window)
+}
+
+// Удаление окна данных из списка отслеживаемых
+func (mw *MainWindow) removeDataWindow(window *DataDisplayWindow) {
+	for i, win := range mw.openDataWindows {
+		if win == window {
+			mw.openDataWindows = append(mw.openDataWindows[:i], mw.openDataWindows[i+1:]...)
+			break
+		}
+	}
+}
+
+// Вспомогательный метод для показа сообщения об успехе
+func (mw *MainWindow) showSuccessMessage(message string) {
+	infoDialog := dialog.NewInformation("Успех", message, mw.window)
+	infoDialog.Show()
 }
 
 func (mw *MainWindow) showAdvancedQuery() {
