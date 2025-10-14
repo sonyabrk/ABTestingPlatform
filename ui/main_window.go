@@ -59,48 +59,39 @@ func (mw *MainWindow) CreateUI() {
 	mw.subtitleLabel.Alignment = fyne.TextAlignCenter
 	mw.subtitleLabel.Wrapping = fyne.TextWrapOff
 
-	// Создаем контейнеры для кнопок
-	mainButtonsContainer := container.NewVBox(
-		layout.NewSpacer(),
+	leftColumn := container.NewVBox(
+		widget.NewLabelWithStyle("Основные операции", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		createSchemaBtn,
 		addDataBtn,
 		showDataBtn,
 		showSummaryBtn,
-		layout.NewSpacer(),
 	)
 
-	dbFunctionsContainer := container.NewVBox(
-		layout.NewSpacer(),
-		widget.NewLabel("Функции БД:"),
+	rightColumn := container.NewVBox(
+		widget.NewLabelWithStyle("Функции БД", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		alterTableBtn,
 		advancedQueryBtn,
 		joinBuilderBtn,
 		textSearchBtn,
 		stringFunctionsBtn,
-		layout.NewSpacer(),
 	)
 
-	// Создаем меню
-	mw.window.SetMainMenu(mw.createMenu())
+	// Адаптивный контейнер - на маленьких экранах вертикально, на больших горизонтально
+	adaptiveContainer := container.NewAdaptiveGrid(2, leftColumn, rightColumn)
 
-	// Основной контент с двумя колонками
-	contentColumns := container.NewHBox(
-		container.NewVBox(
-			widget.NewLabel("Основные операции:"),
-			mainButtonsContainer,
-		),
-		container.NewVBox(
-			widget.NewLabel("Расширенные функции БД:"),
-			dbFunctionsContainer,
-		),
-	)
+	// Центрируем
+	centeredContainer := container.NewCenter(adaptiveContainer)
 
+	// Основной контент
 	mainContent := container.NewVBox(
 		container.NewCenter(mw.titleLabel),
 		container.NewCenter(mw.subtitleLabel),
 		widget.NewSeparator(),
-		contentColumns,
+		centeredContainer,
 	)
+
+	// Создаем меню
+	mw.window.SetMainMenu(mw.createMenu())
 
 	// Добавляем отступы и возможность прокрутки
 	paddedContent := container.NewBorder(
