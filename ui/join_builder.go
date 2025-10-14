@@ -72,6 +72,27 @@ func (j *JoinBuilderWindow) buildUI() {
 	j.resultLabel = widget.NewLabel("Постройте JOIN для просмотра результатов")
 	j.resultLabel.Wrapping = fyne.TextWrapWord
 
+	mainTableLabel := widget.NewLabel("Основная таблица:")
+	mainTableLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	joinTypeLabel := widget.NewLabel("Тип JOIN:")
+	joinTypeLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	joinTableLabel := widget.NewLabel("Присоединяемая таблица:")
+	joinTableLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	mainColumnLabel := widget.NewLabel("Столбец основной таблицы:")
+	mainColumnLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	joinColumnLabel := widget.NewLabel("Столбец присоединяемой таблицы:")
+	joinColumnLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	sqlLabel := widget.NewLabel("SQL запрос:")
+	sqlLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	additionalJoinsLabel := widget.NewLabel("Дополнительные JOIN:")
+	additionalJoinsLabel.TextStyle = fyne.TextStyle{Bold: true}
+
 	// Таблица с переносом текста
 	j.resultTable = widget.NewTable(
 		func() (int, int) { return 0, 0 },
@@ -96,25 +117,26 @@ func (j *JoinBuilderWindow) buildUI() {
 
 	// Компоновка
 	joinForm := container.NewVBox(
-		widget.NewLabel("Основная таблица:"),
+		mainTableLabel,
 		j.mainTableSelect,
-		widget.NewLabel("Тип JOIN:"),
+		joinTypeLabel,
 		j.joinTypeSelect,
-		widget.NewLabel("Присоединяемая таблица:"),
+		joinTableLabel,
 		j.joinTableSelect,
-		widget.NewLabel("Столбец основной таблицы:"),
+		mainColumnLabel,
 		j.mainColumnSelect,
-		widget.NewLabel("Столбец присоединяемой таблицы:"),
+		joinColumnLabel,
 		j.joinColumnSelect,
 	)
 
 	formContainer := container.NewVScroll(container.NewVBox(
 		joinForm,
 		hintLabel,
+		additionalJoinsLabel,
 		addJoinBtn,
 		j.additionalJoins,
 		container.NewHBox(executeBtn, clearBtn),
-		widget.NewLabel("SQL запрос:"),
+		sqlLabel,
 		j.sqlPreview,
 	))
 

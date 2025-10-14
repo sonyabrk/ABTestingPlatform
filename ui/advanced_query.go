@@ -123,6 +123,21 @@ func (a *AdvancedQueryWindow) buildUI() {
 	hintLabel := widget.NewLabel("💡 Подсказки:\n• Для LIKE используйте % для поиска частей текста\n• Для IN перечислите значения через запятую\n• IS NULL и IS NOT NULL не требуют значения")
 	hintLabel.Wrapping = fyne.TextWrapWord
 
+	whereLabel := widget.NewLabel("Условия WHERE:")
+	whereLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	orderByLabel := widget.NewLabel("Сортировка ORDER BY:")
+	orderByLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	groupByLabel := widget.NewLabel("GROUP BY:")
+	groupByLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	havingLabel := widget.NewLabel("Условия HAVING:")
+	havingLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	limitLabelTitle := widget.NewLabel("Ограничение результатов:")
+	limitLabelTitle.TextStyle = fyne.TextStyle{Bold: true}
+
 	// Компоновка
 	leftPanel := container.NewVBox(
 		widget.NewLabel("Таблица:"),
@@ -132,26 +147,28 @@ func (a *AdvancedQueryWindow) buildUI() {
 	)
 
 	conditionsPanel := container.NewVBox(
-		widget.NewLabel("Условия WHERE:"),
+		whereLabel,
 		a.whereContainer,
 		addWhereBtn,
 		widget.NewSeparator(),
-		widget.NewLabel("Сортировка ORDER BY:"),
+		orderByLabel,
 		a.orderByContainer,
 		addOrderByBtn,
 		widget.NewSeparator(),
-		widget.NewLabel("GROUP BY:"),
+		groupByLabel,
 		a.groupByList,
-		widget.NewLabel("Условия HAVING:"),
+		widget.NewSeparator(),
+		havingLabel,
 		a.havingContainer,
 		addHavingBtn,
 		widget.NewSeparator(),
+		limitLabelTitle,
 		a.limitLabel,
 		a.limitSlider,
+		widget.NewSeparator(),
 		hintLabel,
 	)
 
-	// Создаем HBox для кнопок
 	buttonsContainer := container.NewHBox(executeBtn, showSQLBtn, clearBtn)
 
 	rightPanel := container.NewVBox(
