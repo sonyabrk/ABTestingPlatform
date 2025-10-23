@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"testing-platform/db"
 	"testing-platform/db/models"
@@ -29,16 +31,32 @@ type JoinBuilderWindow struct {
 	resultLabel     *widget.Label
 	sqlPreview      *widget.Entry
 
+	// Новые поля для сортировки и фильтрации
+	sortColumnSelect    *widget.Select
+	sortDirectionSelect *widget.Select
+	filterInput         *widget.Entry
+	filterColumnSelect  *widget.Select
+
 	tables       []string
 	tableColumns map[string][]models.ColumnInfo
+
+	// Данные для сортировки и фильтрации
+	currentResult *models.QueryResult
+	filteredRows  []map[string]interface{}
+	sortColumn    string
+	sortAscending bool
+	filterText    string
+	filterColumn  string
 }
 
 func NewJoinBuilderWindow(repo *db.Repository, mainWindow fyne.Window) *JoinBuilderWindow {
 	j := &JoinBuilderWindow{
-		repository:   repo,
-		mainWindow:   mainWindow,
-		window:       fyne.CurrentApp().NewWindow("Мастер JOIN"),
-		tableColumns: make(map[string][]models.ColumnInfo),
+		repository:    repo,
+		mainWindow:    mainWindow,
+		window:        fyne.CurrentApp().NewWindow("Мастер JOIN"),
+		tableColumns:  make(map[string][]models.ColumnInfo),
+		sortAscending: true,
+		filterColumn:  "Все столбцы",
 	}
 
 	j.buildUI()
@@ -71,6 +89,23 @@ func (j *JoinBuilderWindow) buildUI() {
 
 	j.resultLabel = widget.NewLabel("Постройте JOIN для просмотра результатов")
 	j.resultLabel.Wrapping = fyne.TextWrapWord
+
+	// НОВЫЕ ЭЛЕМЕНТЫ ДЛЯ СОРТИРОВКИ И ФИЛЬТРАЦИИ
+	j.sortColumnSelect = widget.NewSelect([]string{}, nil)
+	j.sortColumnSelect.PlaceHolder = "Столбец для сортировки"
+	j.sortColumnSelect.OnChanged = j.onSortColumnChanged
+
+	j.sortDirectionSelect = widget.NewSelect([]string{"По возрастанию ↑", "По убыванию ↓"}, nil)
+	j.sortDirectionSelect.SetSelected("По возрастанию ↑")
+	j.sortDirectionSelect.OnChanged = j.onSortDirectionChanged
+
+	j.filterInput = widget.NewEntry()
+	j.filterInput.SetPlaceHolder("Текст для фильтрации...")
+	j.filterInput.OnChanged = j.onFilterTextChanged
+
+	j.filterColumnSelect = widget.NewSelect([]string{"Все столбцы"}, nil)
+	j.filterColumnSelect.SetSelected("Все столбцы")
+	j.filterColumnSelect.OnChanged = j.onFilterColumnChanged
 
 	mainTableLabel := widget.NewLabel("Основная таблица:")
 	mainTableLabel.TextStyle = fyne.TextStyle{Bold: true}
@@ -111,6 +146,26 @@ func (j *JoinBuilderWindow) buildUI() {
 	executeBtn := widget.NewButton("Выполнить JOIN", j.executeJoin)
 	clearBtn := widget.NewButton("Очистить", j.clearForm)
 
+	// Кнопки для управления сортировкой и фильтрацией
+	sortFilterLabel := widget.NewLabel("Сортировка и фильтрация результатов:")
+	sortFilterLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	resetSortFilterBtn := widget.NewButton("Сбросить сортировку/фильтр", j.resetSortFilter)
+
+	// Контейнер для сортировки
+	sortContainer := container.NewHBox(
+		widget.NewLabel("Сортировка:"),
+		j.sortColumnSelect,
+		j.sortDirectionSelect,
+	)
+
+	// Контейнер для фильтрации
+	filterContainer := container.NewHBox(
+		widget.NewLabel("Фильтр:"),
+		j.filterColumnSelect,
+		j.filterInput,
+	)
+
 	// Добавляем подсказки
 	hintLabel := widget.NewLabel("💡 Подсказки:\n• Сначала выберите основную таблицу\n• Затем выберите таблицу для JOIN и столбцы для связи\n• INNER JOIN - только совпадающие строки\n• LEFT JOIN - все строки из левой таблицы\n• RIGHT JOIN - все строки из правой таблицы\n• FULL JOIN - все строки из обеих таблиц")
 	hintLabel.Wrapping = fyne.TextWrapWord
@@ -143,9 +198,15 @@ func (j *JoinBuilderWindow) buildUI() {
 	// Ограничиваем минимальную высоту формы
 	formContainer.SetMinSize(fyne.NewSize(0, 300))
 
-	// Создаем контейнер для результатов
+	// Создаем контейнер для результатов с элементами сортировки и фильтрации
 	resultContainer := container.NewBorder(
-		j.resultLabel, nil, nil, nil,
+		container.NewVBox(
+			j.resultLabel,
+			sortFilterLabel,
+			sortContainer,
+			filterContainer,
+			resetSortFilterBtn,
+		), nil, nil, nil,
 		container.NewScroll(j.resultTable),
 	)
 
@@ -158,6 +219,305 @@ func (j *JoinBuilderWindow) buildUI() {
 
 	j.window.SetContent(split)
 	j.window.Resize(fyne.NewSize(1200, 800))
+}
+
+// НОВЫЕ МЕТОДЫ ДЛЯ СОРТИРОВКИ И ФИЛЬТРАЦИИ
+
+// Обновление списка столбцов для сортировки и фильтрации
+func (j *JoinBuilderWindow) updateSortFilterColumns(columns []string) {
+	j.sortColumnSelect.Options = columns
+	j.sortColumnSelect.Refresh()
+
+	// Для фильтрации добавляем опцию "Все столбцы"
+	filterOptions := append([]string{"Все столбцы"}, columns...)
+	j.filterColumnSelect.Options = filterOptions
+	j.filterColumnSelect.Refresh()
+}
+
+// Обработчик изменения столбца сортировки
+func (j *JoinBuilderWindow) onSortColumnChanged(column string) {
+	j.sortColumn = column
+	j.applySortAndFilter()
+}
+
+// Обработчик изменения направления сортировки
+func (j *JoinBuilderWindow) onSortDirectionChanged(direction string) {
+	j.sortAscending = direction == "По возрастанию ↑"
+	j.applySortAndFilter()
+}
+
+// Обработчик изменения текста фильтра
+func (j *JoinBuilderWindow) onFilterTextChanged(filterText string) {
+	j.filterText = strings.ToLower(filterText)
+	j.applySortAndFilter()
+}
+
+// Обработчик изменения столбца фильтрации
+func (j *JoinBuilderWindow) onFilterColumnChanged(column string) {
+	j.filterColumn = column
+	j.applySortAndFilter()
+}
+
+// Сброс сортировки и фильтрации
+func (j *JoinBuilderWindow) resetSortFilter() {
+	j.sortColumnSelect.SetSelected("")
+	j.sortDirectionSelect.SetSelected("По возрастанию ↑")
+	j.filterInput.SetText("")
+	j.filterColumnSelect.SetSelected("Все столбцы")
+
+	j.sortColumn = ""
+	j.sortAscending = true
+	j.filterText = ""
+	j.filterColumn = "Все столбцы"
+
+	j.applySortAndFilter()
+}
+
+// Применение сортировки и фильтрации
+func (j *JoinBuilderWindow) applySortAndFilter() {
+	if j.currentResult == nil || len(j.currentResult.Rows) == 0 {
+		return
+	}
+
+	// Применяем фильтрацию
+	j.filteredRows = j.applyFilter(j.currentResult.Rows)
+
+	// Применяем сортировку
+	if j.sortColumn != "" {
+		j.applySort(j.filteredRows)
+	}
+
+	// Обновляем отображение
+	j.refreshResultTable()
+
+	// Обновляем label с информацией
+	totalRows := len(j.currentResult.Rows)
+	filteredRows := len(j.filteredRows)
+
+	if totalRows == filteredRows {
+		j.resultLabel.SetText(fmt.Sprintf("Найдено %d строк", totalRows))
+	} else {
+		j.resultLabel.SetText(fmt.Sprintf("Найдено %d строк (отфильтровано из %d)", filteredRows, totalRows))
+	}
+}
+
+// Применение фильтрации
+func (j *JoinBuilderWindow) applyFilter(rows []map[string]interface{}) []map[string]interface{} {
+	if j.filterText == "" {
+		return rows
+	}
+
+	var filtered []map[string]interface{}
+	for _, row := range rows {
+		if j.rowMatchesFilter(row) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
+}
+
+// Проверка соответствия строки фильтру
+func (j *JoinBuilderWindow) rowMatchesFilter(row map[string]interface{}) bool {
+	if j.filterText == "" {
+		return true
+	}
+
+	// Если выбран конкретный столбец для фильтрации
+	if j.filterColumn != "Все столбцы" {
+		value := row[j.filterColumn]
+		if value != nil {
+			valueStr := strings.ToLower(fmt.Sprintf("%v", value))
+			return strings.Contains(valueStr, j.filterText)
+		}
+		return false
+	}
+
+	// Поиск по всем столбцам
+	for _, value := range row {
+		if value != nil {
+			valueStr := strings.ToLower(fmt.Sprintf("%v", value))
+			if strings.Contains(valueStr, j.filterText) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Применение сортировки
+// Применение сортировки
+func (j *JoinBuilderWindow) applySort(rows []map[string]interface{}) {
+	if j.sortColumn == "" {
+		return
+	}
+
+	sort.Slice(rows, func(a, b int) bool {
+		val1 := rows[a][j.sortColumn]
+		val2 := rows[b][j.sortColumn]
+
+		// Обработка nil значений
+		if val1 == nil && val2 == nil {
+			return false
+		}
+		if val1 == nil {
+			return !j.sortAscending
+		}
+		if val2 == nil {
+			return j.sortAscending
+		}
+
+		// Преобразование в строку для сравнения
+		str1 := fmt.Sprintf("%v", val1)
+		str2 := fmt.Sprintf("%v", val2)
+
+		// Попытка численного сравнения
+		if num1, err1 := strconv.ParseFloat(str1, 64); err1 == nil {
+			if num2, err2 := strconv.ParseFloat(str2, 64); err2 == nil {
+				if j.sortAscending {
+					return num1 < num2
+				}
+				return num1 > num2
+			}
+		}
+
+		// Строковое сравнение
+		if j.sortAscending {
+			return str1 < str2
+		}
+		return str1 > str2
+	})
+}
+
+// Обновление таблицы результатов
+func (j *JoinBuilderWindow) refreshResultTable() {
+	if len(j.filteredRows) == 0 {
+		j.resultTable.Length = func() (int, int) { return 1, 1 }
+		j.resultTable.UpdateCell = func(id widget.TableCellID, obj fyne.CanvasObject) {
+			label := obj.(*widget.Label)
+			label.Wrapping = fyne.TextWrapWord
+			if id.Row == 0 && id.Col == 0 {
+				label.SetText("Нет данных, соответствующих фильтру")
+			}
+		}
+		j.resultTable.Refresh()
+		return
+	}
+
+	columns := j.currentResult.Columns
+	j.resultTable.Length = func() (int, int) {
+		return len(j.filteredRows) + 1, len(columns)
+	}
+
+	// Автоматическая настройка ширины колонок
+	for col := 0; col < len(columns); col++ {
+		maxWidth := float32(150)
+		headerWidth := float32(len(columns[col])) * 8
+		if headerWidth > maxWidth {
+			maxWidth = headerWidth
+		}
+		for row := 0; row < len(j.filteredRows) && row < 10; row++ {
+			if value := j.filteredRows[row][columns[col]]; value != nil {
+				text := fmt.Sprintf("%v", value)
+				textWidth := float32(len(text)) * 7
+				if textWidth > maxWidth {
+					maxWidth = textWidth
+				}
+			}
+		}
+		if maxWidth > 400 {
+			maxWidth = 400
+		}
+		j.resultTable.SetColumnWidth(col, maxWidth)
+	}
+
+	j.resultTable.UpdateCell = func(id widget.TableCellID, obj fyne.CanvasObject) {
+		label := obj.(*widget.Label)
+		label.Wrapping = fyne.TextWrapWord
+
+		if id.Row == 0 {
+			if id.Col < len(columns) {
+				columnName := columns[id.Col]
+				// Подсвечиваем столбец, по которому идет сортировка
+				if columnName == j.sortColumn {
+					label.SetText(columnName + j.getSortIndicator())
+					label.TextStyle = fyne.TextStyle{Bold: true}
+				} else {
+					label.SetText(columnName)
+					label.TextStyle = fyne.TextStyle{Bold: true}
+				}
+			}
+		} else {
+			rowIndex := id.Row - 1
+			if rowIndex < len(j.filteredRows) && id.Col < len(columns) {
+				value := j.filteredRows[rowIndex][columns[id.Col]]
+				if value != nil {
+					label.SetText(fmt.Sprintf("%v", value))
+				} else {
+					label.SetText("NULL")
+				}
+			}
+		}
+	}
+
+	j.resultTable.Refresh()
+}
+
+// Получение индикатора сортировки
+func (j *JoinBuilderWindow) getSortIndicator() string {
+	if j.sortAscending {
+		return " ↑"
+	}
+	return " ↓"
+}
+
+// ОСНОВНЫЕ МЕТОДЫ ОТОБРАЖЕНИЯ РЕЗУЛЬТАТОВ И ОЧИСТКИ
+
+func (j *JoinBuilderWindow) displayResults(result *models.QueryResult) {
+	j.currentResult = result
+	j.filteredRows = result.Rows
+
+	// Обновляем списки столбцов для сортировки и фильтрации
+	j.updateSortFilterColumns(result.Columns)
+
+	// Сбрасываем состояние сортировки и фильтрации
+	j.resetSortFilter()
+
+	if len(result.Rows) == 0 {
+		j.resultTable.Length = func() (int, int) { return 1, 1 }
+		j.resultTable.UpdateCell = func(id widget.TableCellID, obj fyne.CanvasObject) {
+			label := obj.(*widget.Label)
+			label.Wrapping = fyne.TextWrapWord
+			if id.Row == 0 && id.Col == 0 {
+				label.SetText("Нет данных")
+			}
+		}
+		j.resultLabel.SetText("JOIN выполнен успешно, но не найдено совпадающих строк")
+		return
+	}
+
+	j.applySortAndFilter()
+}
+
+func (j *JoinBuilderWindow) clearForm() {
+	j.mainTableSelect.SetSelected("")
+	j.joinTableSelect.SetSelected("")
+	j.mainColumnSelect.SetSelected("")
+	j.joinColumnSelect.SetSelected("")
+	j.additionalJoins.Items = nil
+	j.additionalJoins.Refresh()
+	j.sqlPreview.SetText("")
+	j.resultLabel.SetText("Постройте JOIN для просмотра результатов")
+	j.resultTable.Length = func() (int, int) { return 0, 0 }
+	j.resultTable.Refresh()
+
+	// Сбрасываем состояние сортировки и фильтрации
+	j.currentResult = nil
+	j.filteredRows = nil
+	j.sortColumnSelect.Options = []string{}
+	j.filterColumnSelect.Options = []string{"Все столбцы"}
+	j.sortColumnSelect.Refresh()
+	j.filterColumnSelect.Refresh()
+	j.resetSortFilter()
 }
 
 // Валидация формы JOIN
@@ -564,13 +924,12 @@ func (j *JoinBuilderWindow) executeJoin() {
 	}
 
 	if result.Error != "" {
-		errorMsg := j.formatDatabaseError(fmt.Errorf("result.Error"))
+		errorMsg := j.formatDatabaseError(fmt.Errorf("%s", result.Error))
 		j.resultLabel.SetText("Ошибка базы данных: " + errorMsg)
 		return
 	}
 
 	j.displayResults(result)
-	j.resultLabel.SetText(fmt.Sprintf("Найдено %d строк", len(result.Rows)))
 }
 
 // Форматирование ошибок базы данных
@@ -603,84 +962,6 @@ func (j *JoinBuilderWindow) formatDatabaseError(err error) string {
 	}
 
 	return "внутренняя ошибка базы данных"
-}
-
-func (j *JoinBuilderWindow) displayResults(result *models.QueryResult) {
-	if len(result.Rows) == 0 {
-		j.resultTable.Length = func() (int, int) { return 1, 1 }
-		j.resultTable.UpdateCell = func(id widget.TableCellID, obj fyne.CanvasObject) {
-			label := obj.(*widget.Label)
-			label.Wrapping = fyne.TextWrapWord
-			if id.Row == 0 && id.Col == 0 {
-				label.SetText("Нет данных")
-			}
-		}
-		j.resultLabel.SetText("JOIN выполнен успешно, но не найдено совпадающих строк")
-		return
-	}
-
-	j.resultTable.Length = func() (int, int) {
-		return len(result.Rows) + 1, len(result.Columns)
-	}
-
-	// Автоматическая настройка ширины колонок
-	for col := 0; col < len(result.Columns); col++ {
-		maxWidth := float32(150)
-		headerWidth := float32(len(result.Columns[col])) * 8
-		if headerWidth > maxWidth {
-			maxWidth = headerWidth
-		}
-		for row := 0; row < len(result.Rows) && row < 10; row++ {
-			if value := result.Rows[row][result.Columns[col]]; value != nil {
-				text := fmt.Sprintf("%v", value)
-				textWidth := float32(len(text)) * 7
-				if textWidth > maxWidth {
-					maxWidth = textWidth
-				}
-			}
-		}
-		if maxWidth > 400 {
-			maxWidth = 400
-		}
-		j.resultTable.SetColumnWidth(col, maxWidth)
-	}
-
-	j.resultTable.UpdateCell = func(id widget.TableCellID, obj fyne.CanvasObject) {
-		label := obj.(*widget.Label)
-		label.Wrapping = fyne.TextWrapWord
-
-		if id.Row == 0 {
-			if id.Col < len(result.Columns) {
-				label.SetText(result.Columns[id.Col])
-				label.TextStyle = fyne.TextStyle{Bold: true}
-			}
-		} else {
-			rowIndex := id.Row - 1
-			if rowIndex < len(result.Rows) && id.Col < len(result.Columns) {
-				value := result.Rows[rowIndex][result.Columns[id.Col]]
-				if value != nil {
-					label.SetText(fmt.Sprintf("%v", value))
-				} else {
-					label.SetText("NULL")
-				}
-			}
-		}
-	}
-
-	j.resultTable.Refresh()
-}
-
-func (j *JoinBuilderWindow) clearForm() {
-	j.mainTableSelect.SetSelected("")
-	j.joinTableSelect.SetSelected("")
-	j.mainColumnSelect.SetSelected("")
-	j.joinColumnSelect.SetSelected("")
-	j.additionalJoins.Items = nil
-	j.additionalJoins.Refresh()
-	j.sqlPreview.SetText("")
-	j.resultLabel.SetText("Постройте JOIN для просмотра результатов")
-	j.resultTable.Length = func() (int, int) { return 0, 0 }
-	j.resultTable.Refresh()
 }
 
 func (j *JoinBuilderWindow) showError(err error) {
