@@ -1,13 +1,13 @@
 package models
 
-// ColumnInfo информация о столбце таблицы
+// ColumnInfo представляет информацию о столбце таблицы
 type ColumnInfo struct {
 	Name         string `json:"name"`
 	DataType     string `json:"data_type"`
 	IsNullable   bool   `json:"is_nullable"`
-	IsPrimaryKey bool   `json:"is_primary_key"`
 	DefaultValue string `json:"default_value"`
 	MaxLength    int    `json:"max_length"`
+	IsPrimaryKey bool   `json:"is_primary_key"`
 }
 
 // TableInfo информация о таблице

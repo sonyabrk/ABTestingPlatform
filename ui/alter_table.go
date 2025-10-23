@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing-platform/db"
+	"testing-platform/pkg/logger"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -449,41 +450,70 @@ func (a *AlterTableWindow) buildAlterQuery() (string, error) {
 }
 
 func (a *AlterTableWindow) executeQuery(query string) {
-	// Сохраняем старое имя таблицы для информационного сообщения
-	action := a.actionSelect.Selected
+    err := a.repository.ExecuteAlter(context.Background(), query)
+    if err != nil {
+        a.showError(err)
+        return
+    }
 
-	// Выполняем запрос
-	err := a.repository.ExecuteAlter(context.Background(), query)
-	if err != nil {
-		a.showError(err)
-		return
-	}
+    // Обновляем интерфейс
+    a.refreshData()
+    a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
 
-	// Обновляем интерфейс
-	a.refreshData()
-	a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
-	
-	// Специальная обработка для переименования таблицы
-	if action == "Переименовать таблицу" {
-		// Показываем информационное сообщение о DBeaver
-		
-		// Обновляем текущую выбранную таблицу на новую
-		a.currentTable = a.newColumnName.Text
-	}
-	
-	// Очищаем поля после успешного выполнения
-	a.columnName.SetText("")
-	a.newColumnName.SetText("")
-	a.constraintValue.SetText("")
-	a.defaultValue.SetText("")
-	a.referenceTable.SetText("")
-	a.referenceColumn.SetText("")
-	
-	// Автоматически обновляем все открытые окна данных
-	if a.onTableChanged != nil {
-		a.onTableChanged()
-	}
+    // Специальная обработка для переименования таблицы
+    if a.actionSelect.Selected == "Переименовать таблицу" {
+        a.currentTable = a.newColumnName.Text
+    }
+
+    // Очищаем поля
+    a.columnName.SetText("")
+    a.newColumnName.SetText("")
+    a.constraintValue.SetText("")
+    a.defaultValue.SetText("")
+    a.referenceTable.SetText("")
+    a.referenceColumn.SetText("")
+
+    // ВАЖНО: Вызываем callback для обновления всех окон данных
+    logger.Info("Вызов callback onTableChanged. Функция установлена: %t", a.onTableChanged != nil)
+    if a.onTableChanged != nil {
+        a.onTableChanged()
+    } else {
+        logger.Error("Callback onTableChanged НЕ установлен!")
+    }
 }
+
+// func (a *AlterTableWindow) executeQuery(query string) {
+// 	err := a.repository.ExecuteAlter(context.Background(), query)
+// 	if err != nil {
+// 		a.showError(err)
+// 		return
+// 	}
+
+// 	// Обновляем интерфейс
+// 	a.refreshData()
+// 	a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
+
+// 	// Специальная обработка для переименования таблицы
+// 	if a.actionSelect.Selected == "Переименовать таблицу" {
+// 		a.currentTable = a.newColumnName.Text
+// 	}
+
+// 	// Очищаем поля
+// 	a.columnName.SetText("")
+// 	a.newColumnName.SetText("")
+// 	a.constraintValue.SetText("")
+// 	a.defaultValue.SetText("")
+// 	a.referenceTable.SetText("")
+// 	a.referenceColumn.SetText("")
+
+// 	// ВАЖНО: Вызываем callback для обновления всех окон данных
+// 	if a.onTableChanged != nil {
+// 		logger.Info("Вызов callback для обновления интерфейса")
+// 		a.onTableChanged()
+// 	} else {
+// 		logger.Error("Callback onTableChanged не установлен!")
+// 	}
+// }
 
 func (a *AlterTableWindow) applyChanges() {
 	query, err := a.buildAlterQuery()

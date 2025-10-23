@@ -20,26 +20,32 @@ type DataDisplayWindow struct {
 	mainWindow     *MainWindow
 	tableContainer *fyne.Container
 	filterPanel    *fyne.Container
+	currentFilter  models.ExperimentFilter // Сохраняем текущий фильтр
 }
 
 // NewDataDisplayWindow создает новое окно отображения данных
 func NewDataDisplayWindow(mw *MainWindow) *DataDisplayWindow {
+	logger.Info("Создание нового окна данных. Полученное главное окно: %p", mw)
+
 	d := &DataDisplayWindow{
 		mainWindow: mw,
 		window:     mw.app.NewWindow("Данные экспериментов"),
 	}
-	
+
 	d.window.Resize(fyne.NewSize(1000, 700))
-	d.buildUI()
-	
-	// Добавляем окно в список открытых окон главного окна
+
+	// Сразу регистрируем окно в главном окне
+	logger.Info("Регистрация нового окна данных %p в главном окне %p", d, mw)
 	mw.addDataWindow(d)
-	
+
+	d.buildUI()
+
 	// Устанавливаем обработчик закрытия окна
 	d.window.SetOnClosed(func() {
+		logger.Info("Закрытие окна данных %p, удаление из главного окна %p", d, mw)
 		mw.removeDataWindow(d)
 	})
-	
+
 	return d
 }
 
@@ -98,7 +104,6 @@ func (d *DataDisplayWindow) buildUI() {
 		d.updateTable(models.ExperimentFilter{})
 	}
 
-	// Кнопка обновления данных
 	refreshBtn := widget.NewButton("Обновить данные", func() {
 		d.refreshData()
 	})
@@ -148,7 +153,7 @@ func (d *DataDisplayWindow) buildUI() {
 
 	// создание основного контейнера
 	content := container.NewBorder(
-		d.filterPanel,                 // верхняя панель с фильтрами
+		d.filterPanel,               // верхняя панель с фильтрами
 		container.NewHBox(closeBtn), // нижняя панель с кнопкой закрытия
 		nil, nil,
 		d.tableContainer, // центральная область с таблицей
@@ -157,60 +162,160 @@ func (d *DataDisplayWindow) buildUI() {
 	d.window.SetContent(content)
 }
 
-// Обновление данных в таблице
+// RefreshData принудительно обновляет данные в окне
+func (d *DataDisplayWindow) RefreshData() {
+	logger.Info("Обновление данных в окне отображения")
+	d.refreshDataSilent()
+}
+
+// refreshDataSilent обновляет данные без показа диалога
+func (d *DataDisplayWindow) refreshDataSilent() {
+	d.updateTable(d.currentFilter) // Используем текущий фильтр
+}
+
+// Обновим существующий refreshData
 func (d *DataDisplayWindow) refreshData() {
-	d.updateTable(models.ExperimentFilter{})
+	d.refreshDataSilent()
 	dialog.ShowInformation("Обновлено", "Данные успешно обновлены", d.window)
 }
 
+// convertValueToString конвертирует любое значение в строку для отображения
+func convertValueToString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+
+	switch v := value.(type) {
+	case string:
+		return v
+	case int, int32, int64:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%.2f", v)
+	case bool:
+		return fmt.Sprintf("%t", v)
+	case []string:
+		return strings.Join(v, ", ")
+	case []byte:
+		return string(v)
+	case time.Time:
+		return v.Format("2006-01-02 15:04:05")
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
 func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
+	// Сохраняем текущий фильтр
+	d.currentFilter = filter
+
 	ctx := context.Background()
-	experiments, err := d.mainWindow.rep.GetExperiments(ctx, filter)
-	if err != nil {
-		logger.Error("Ошибка получения экспериментов: %v", err)
-		dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), d.window)
+
+	// Получаем динамические данные из таблицы experiments
+	query := "SELECT * FROM experiments"
+	if filter.AlgorithmA != "" || filter.AlgorithmB != "" || filter.IsActive != nil || !filter.StartDateFrom.IsZero() || !filter.StartDateTo.IsZero() {
+		query += " WHERE 1=1"
+		var conditions []string
+		var args []interface{}
+		argCount := 1
+
+		if filter.AlgorithmA != "" {
+			conditions = append(conditions, fmt.Sprintf("algorithm_a = $%d", argCount))
+			args = append(args, filter.AlgorithmA)
+			argCount++
+		}
+		if filter.AlgorithmB != "" {
+			conditions = append(conditions, fmt.Sprintf("algorithm_b = $%d", argCount))
+			args = append(args, filter.AlgorithmB)
+			argCount++
+		}
+		if filter.IsActive != nil {
+			conditions = append(conditions, fmt.Sprintf("is_active = $%d", argCount))
+			args = append(args, *filter.IsActive)
+			argCount++
+		}
+		if !filter.StartDateFrom.IsZero() {
+			conditions = append(conditions, fmt.Sprintf("start_date >= $%d", argCount))
+			args = append(args, filter.StartDateFrom)
+			argCount++
+		}
+		if !filter.StartDateTo.IsZero() {
+			conditions = append(conditions, fmt.Sprintf("start_date <= $%d", argCount))
+			args = append(args, filter.StartDateTo)
+			argCount++
+		}
+
+		if len(conditions) > 0 {
+			query += " AND " + strings.Join(conditions, " AND ")
+		}
+
+		query += " ORDER BY start_date DESC"
+
+		// Выполняем запрос с фильтрами
+		result, err := d.mainWindow.rep.ExecuteQuery(ctx, query)
+		if err != nil {
+			logger.Error("Ошибка получения экспериментов: %v", err)
+			dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), d.window)
+			return
+		}
+
+		d.createDynamicTable(result)
+	} else {
+		// Без фильтров - простой запрос
+		result, err := d.mainWindow.rep.ExecuteQuery(ctx, query+" ORDER BY start_date DESC")
+		if err != nil {
+			logger.Error("Ошибка получения экспериментов: %v", err)
+			dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), d.window)
+			return
+		}
+
+		d.createDynamicTable(result)
+	}
+}
+
+// createDynamicTable создает таблицу с динамическими столбцами
+func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
+	if result.Error != "" {
+		logger.Error("Ошибка в результате запроса: %s", result.Error)
+		dialog.ShowError(fmt.Errorf("ошибка выполнения запроса: %s", result.Error), d.window)
 		return
 	}
 
-	// подготовка данных для таблицы
+	// Подготавливаем данные для таблицы
 	data := make([][]string, 0)
-	for _, exp := range experiments {
-		data = append(data, []string{
-			fmt.Sprintf("%d", exp.ID),
-			exp.Name,
-			exp.AlgorithmA,
-			exp.AlgorithmB,
-			fmt.Sprintf("%.2f", exp.UserPercent),
-			exp.StartDate.Format("2006-01-02"),
-			fmt.Sprintf("%t", exp.IsActive),
-			strings.Join(exp.Tags, ", "),
-		})
+
+	// Добавляем строки данных
+	for _, row := range result.Rows {
+		rowData := make([]string, 0)
+		for _, col := range result.Columns {
+			value := row[col]
+			rowData = append(rowData, convertValueToString(value))
+		}
+		data = append(data, rowData)
 	}
 
-	// создание новой таблицы
+	// Создаем таблицу с динамическим количеством столбцов
 	table := widget.NewTable(
 		func() (int, int) {
-			return len(data) + 1, 8
+			return len(data) + 1, len(result.Columns) // +1 для заголовков
 		},
 		func() fyne.CanvasObject {
-			// Создаем label с выравниванием по центру
 			label := widget.NewLabel("")
 			label.Alignment = fyne.TextAlignCenter
 			return label
 		},
 		func(i widget.TableCellID, o fyne.CanvasObject) {
 			label := o.(*widget.Label)
-			label.Alignment = fyne.TextAlignCenter // Выравнивание по центру
+			label.Alignment = fyne.TextAlignCenter
 
-			// 1ая строка - заголовки
+			// Первая строка - заголовки
 			if i.Row == 0 {
-				headers := []string{"ID", "Название", "Алгоритм A", "Алгоритм B", "Пользователи %", "Дата начала", "Активен", "Теги"}
-				if i.Col < len(headers) {
-					label.SetText(headers[i.Col])
+				if i.Col < len(result.Columns) {
+					label.SetText(result.Columns[i.Col])
 					label.TextStyle = fyne.TextStyle{Bold: true}
 				}
 			} else {
-				// смещение данных на одну строку вниз
+				// Данные
 				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
 					label.SetText(data[i.Row-1][i.Col])
 					label.TextStyle = fyne.TextStyle{}
@@ -218,114 +323,18 @@ func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
 			}
 		})
 
-	// установка размеров столбцов
-	table.SetColumnWidth(0, 60)  // ID
-	table.SetColumnWidth(1, 160) // Name
-	table.SetColumnWidth(2, 130) // Algorithm A
-	table.SetColumnWidth(3, 130) // Algorithm B
-	table.SetColumnWidth(4, 130) // User Percent
-	table.SetColumnWidth(5, 120) // Start Date
-	table.SetColumnWidth(6, 90)  // Is Active
-	table.SetColumnWidth(7, 160) // Tags
+	// Устанавливаем размеры столбцов (можно сделать адаптивными)
+	for i := 0; i < len(result.Columns); i++ {
+		table.SetColumnWidth(i, 120) // Базовая ширина для всех столбцов
+	}
 
-	// обновление контейнера с таблицей
+	// Обновление контейнера с таблицей
 	d.tableContainer.Objects = []fyne.CanvasObject{table}
 	d.tableContainer.Refresh()
+
+	logger.Info("Таблица обновлена: %d строк, %d столбцов", len(data), len(result.Columns))
 }
 
 func (d *DataDisplayWindow) Show() {
 	d.window.Show()
-}
-
-// Обновленная функция showDataDisplayWindow в MainWindow
-func (mw *MainWindow) showDataDisplayWindow() {
-	dataWin := NewDataDisplayWindow(mw)
-	dataWin.Show()
-}
-
-// Обновленная функция showSummaryWindow в MainWindow
-func (mw *MainWindow) showSummaryWindow() {
-	// создание нового окна
-	summaryWin := mw.app.NewWindow("Сводные данные экспериментов")
-	summaryWin.Resize(fyne.NewSize(1000, 600))
-
-	// получение данных из репозитория
-	ctx := context.Background()
-	results, err := mw.rep.GetExperimentResultsWithDetails(ctx)
-	if err != nil {
-		logger.Error("Ошибка получения сводных данных: %v", err)
-		dialog.ShowError(fmt.Errorf("не удалось получить сводные данные, проверьте соединение с базой данных"), mw.window)
-		return
-	}
-
-	// подготовка данных для таблицы
-	data := make([][]string, 0)
-	for _, res := range results {
-		avgRatingStr := fmt.Sprintf("%.2f", res.AvgRating)
-
-		data = append(data, []string{
-			fmt.Sprintf("%d", res.ID),
-			res.Name,
-			res.AlgorithmA,
-			res.AlgorithmB,
-			fmt.Sprintf("%d", res.TotalResults),
-			fmt.Sprintf("%d", res.TotalClicks),
-			avgRatingStr,
-		})
-	}
-
-	// создание таблицы
-	table := widget.NewTable(
-		func() (int, int) {
-			return len(data) + 1, 7
-		},
-		func() fyne.CanvasObject {
-			// Создаем label с выравниванием по центру
-			label := widget.NewLabel("")
-			label.Alignment = fyne.TextAlignCenter
-			return label
-		},
-		func(i widget.TableCellID, o fyne.CanvasObject) {
-			label := o.(*widget.Label)
-			label.Alignment = fyne.TextAlignCenter // Выравнивание по центру
-
-			if i.Row == 0 {
-				headers := []string{"ID", "Название", "Алгоритм A", "Алгоритм B", "Результаты", "Клики", "Средний рейтинг"}
-				if i.Col < len(headers) {
-					label.SetText(headers[i.Col])
-					label.TextStyle = fyne.TextStyle{Bold: true}
-				}
-			} else {
-				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
-					label.SetText(data[i.Row-1][i.Col])
-					label.TextStyle = fyne.TextStyle{}
-				}
-			}
-		})
-
-	// настройка размеров столбцов
-	table.SetColumnWidth(0, 60)  // ID
-	table.SetColumnWidth(1, 160) // Name
-	table.SetColumnWidth(2, 130) // Algorithm A
-	table.SetColumnWidth(3, 130) // Algorithm B
-	table.SetColumnWidth(4, 120) // Total Results
-	table.SetColumnWidth(5, 120) // Total Clicks
-	table.SetColumnWidth(6, 130) // Avg Rating
-
-	// кнопка закрытия
-	closeBtn := widget.NewButton("Закрыть", func() {
-		summaryWin.Close()
-	})
-	
-	// кнопка обновления
-	refreshBtn := widget.NewButton("Обновить", func() {
-		// Закрываем и открываем заново для обновления данных
-		summaryWin.Close()
-		mw.showSummaryWindow()
-	})
-
-	// создание контейнера с таблицей и кнопкой
-	content := container.NewBorder(nil, container.NewHBox(refreshBtn, closeBtn), nil, nil, table)
-	summaryWin.SetContent(content)
-	summaryWin.Show()
 }

@@ -1,7 +1,11 @@
 package ui
 
 import (
+	"context"
+	"fmt"
+	"sync"
 	"testing-platform/db"
+	"testing-platform/pkg/logger"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -17,9 +21,13 @@ type MainWindow struct {
 	titleLabel    *widget.Label
 	subtitleLabel *widget.Label
 
-	// Для отслеживания открытых окон
-	openDataWindows    []*DataDisplayWindow
-	openSummaryWindows []fyne.Window
+	// Для отслеживания открытых окон данных
+	dataWindows []*DataDisplayWindow
+	dataMutex   sync.Mutex
+
+	// Для отслеживания открытых сводных окон
+	summaryWindows []fyne.Window
+	summaryMutex   sync.Mutex
 }
 
 func NewMainWindow(app fyne.App, rep *db.Repository) *MainWindow {
@@ -28,11 +36,11 @@ func NewMainWindow(app fyne.App, rep *db.Repository) *MainWindow {
 	window.Resize(fyne.NewSize(900, 600))
 
 	return &MainWindow{
-		app:                app,
-		window:             window,
-		rep:                rep,
-		openDataWindows:    make([]*DataDisplayWindow, 0),
-		openSummaryWindows: make([]fyne.Window, 0),
+		app:            app,
+		window:         window,
+		rep:            rep,
+		dataWindows:    make([]*DataDisplayWindow, 0),
+		summaryWindows: make([]fyne.Window, 0),
 	}
 }
 
@@ -67,6 +75,22 @@ func (mw *MainWindow) CreateUI() {
 		showSummaryBtn,
 	)
 
+	// rightColumn := container.NewVBox(
+	// 	widget.NewLabelWithStyle("Функции БД", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+	// 	alterTableBtn,
+	// 	advancedQueryBtn,
+	// 	joinBuilderBtn,
+	// 	textSearchBtn,
+	// 	stringFunctionsBtn,
+	// )
+
+	// Временная кнопка для отладки
+	debugBtn := widget.NewButton("Отладка: Обновить все окна", func() {
+		logger.Info("Принудительное обновление всех окон")
+		mw.RefreshAllWindows()
+	})
+
+	// Добавьте эту кнопку в интерфейс, например:
 	rightColumn := container.NewVBox(
 		widget.NewLabelWithStyle("Функции БД", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		alterTableBtn,
@@ -74,6 +98,8 @@ func (mw *MainWindow) CreateUI() {
 		joinBuilderBtn,
 		textSearchBtn,
 		stringFunctionsBtn,
+		widget.NewSeparator(),
+		debugBtn, // Добавляем кнопку отладки
 	)
 
 	// Адаптивный контейнер - на маленьких экранах вертикально, на больших горизонтально
@@ -110,6 +136,104 @@ func (mw *MainWindow) CreateUI() {
 	})
 }
 
+// Добавляем методы для управления окнами данных
+func (mw *MainWindow) addDataWindow(dw *DataDisplayWindow) {
+	mw.dataMutex.Lock()
+	defer mw.dataMutex.Unlock()
+	logger.Info("Добавление окна данных в главное окно %p. Теперь окон: %d", mw, len(mw.dataWindows)+1)
+	mw.dataWindows = append(mw.dataWindows, dw)
+
+	// Отладочная информация
+	logger.Info("Содержимое mw.dataWindows:")
+	for i, window := range mw.dataWindows {
+		logger.Info("  Окно %d: %p", i, window)
+	}
+}
+
+// NotifyAllDataWindows уведомляет все открытые окна данных об изменениях
+func (mw *MainWindow) NotifyAllDataWindows() {
+	mw.dataMutex.Lock()
+	defer mw.dataMutex.Unlock()
+
+	logger.Info("Уведомление %d окон данных об обновлении. Главное окно: %p", len(mw.dataWindows), mw)
+
+	for i, dw := range mw.dataWindows {
+		logger.Info("  Обновление окна %d: %p", i, dw)
+		dw.RefreshData()
+	}
+}
+
+// // Добавляем методы для управления окнами данных
+// func (mw *MainWindow) addDataWindow(dw *DataDisplayWindow) {
+// 	mw.dataMutex.Lock()
+// 	defer mw.dataMutex.Unlock()
+// 	logger.Info("Добавление окна данных в главное окно. Теперь окон: %d", len(mw.dataWindows)+1)
+// 	mw.dataWindows = append(mw.dataWindows, dw)
+// }
+
+func (mw *MainWindow) removeDataWindow(dw *DataDisplayWindow) {
+	mw.dataMutex.Lock()
+	defer mw.dataMutex.Unlock()
+	for i, w := range mw.dataWindows {
+		if w == dw {
+			mw.dataWindows = append(mw.dataWindows[:i], mw.dataWindows[i+1:]...)
+			logger.Info("Удаление окна данных из главного окна. Теперь окон: %d", len(mw.dataWindows))
+			break
+		}
+	}
+}
+
+// Добавляем методы для управления сводными окнами
+func (mw *MainWindow) addSummaryWindow(sw fyne.Window) {
+	mw.summaryMutex.Lock()
+	defer mw.summaryMutex.Unlock()
+	logger.Info("Добавление сводного окна в главное окно. Теперь окон: %d", len(mw.summaryWindows)+1)
+	mw.summaryWindows = append(mw.summaryWindows, sw)
+}
+
+func (mw *MainWindow) removeSummaryWindow(sw fyne.Window) {
+	mw.summaryMutex.Lock()
+	defer mw.summaryMutex.Unlock()
+	for i, w := range mw.summaryWindows {
+		if w == sw {
+			mw.summaryWindows = append(mw.summaryWindows[:i], mw.summaryWindows[i+1:]...)
+			logger.Info("Удаление сводного окна из главного окна. Теперь окон: %d", len(mw.summaryWindows))
+			break
+		}
+	}
+}
+
+// // NotifyAllDataWindows уведомляет все открытые окна данных об изменениях
+// func (mw *MainWindow) NotifyAllDataWindows() {
+// 	mw.dataMutex.Lock()
+// 	defer mw.dataMutex.Unlock()
+
+// 	logger.Info("Уведомление %d окон данных об обновлении", len(mw.dataWindows))
+// 	for _, dw := range mw.dataWindows {
+// 		dw.RefreshData()
+// 	}
+// }
+
+// NotifyAllSummaryWindows уведомляет все открытые сводные окна об изменениях
+func (mw *MainWindow) NotifyAllSummaryWindows() {
+	mw.summaryMutex.Lock()
+	defer mw.summaryMutex.Unlock()
+
+	logger.Info("Закрытие %d сводных окон", len(mw.summaryWindows))
+	// Закрываем сводные окна
+	for _, sw := range mw.summaryWindows {
+		sw.Close()
+	}
+	mw.summaryWindows = make([]fyne.Window, 0)
+}
+
+// RefreshAllWindows обновляет все открытые окна
+func (mw *MainWindow) RefreshAllWindows() {
+	logger.Info("Обновление всех окон приложения")
+	mw.NotifyAllDataWindows()
+	mw.NotifyAllSummaryWindows()
+}
+
 // Создание меню
 func (mw *MainWindow) createMenu() *fyne.MainMenu {
 	return fyne.NewMainMenu(
@@ -139,38 +263,135 @@ func (mw *MainWindow) createMenu() *fyne.MainMenu {
 	)
 }
 
-// Методы для открытия новых окон
+// Методы для открытия окон данных
+func (mw *MainWindow) showDataDisplayWindow() {
+	logger.Info("Открытие нового окна данных")
+	dataWin := NewDataDisplayWindow(mw)
+	dataWin.Show()
+}
+
+func (mw *MainWindow) showSummaryWindow() {
+	logger.Info("Открытие нового сводного окна")
+	// создание нового окна
+	summaryWin := mw.app.NewWindow("Сводные данные экспериментов")
+	summaryWin.Resize(fyne.NewSize(1000, 600))
+
+	// Добавляем окно в список отслеживаемых
+	mw.addSummaryWindow(summaryWin)
+
+	// Устанавливаем обработчик закрытия окна
+	summaryWin.SetOnClosed(func() {
+		mw.removeSummaryWindow(summaryWin)
+	})
+
+	// получение данных из репозитория
+	ctx := context.Background()
+	results, err := mw.rep.GetExperimentResultsWithDetails(ctx)
+	if err != nil {
+		logger.Error("Ошибка получения сводных данных: %v", err)
+		dialog.ShowError(fmt.Errorf("не удалось получить сводные данные, проверьте соединение с базой данных"), mw.window)
+		return
+	}
+
+	// подготовка данных для таблицы
+	data := make([][]string, 0)
+	for _, res := range results {
+		avgRatingStr := fmt.Sprintf("%.2f", res.AvgRating)
+
+		data = append(data, []string{
+			fmt.Sprintf("%d", res.ID),
+			res.Name,
+			res.AlgorithmA,
+			res.AlgorithmB,
+			fmt.Sprintf("%d", res.TotalResults),
+			fmt.Sprintf("%d", res.TotalClicks),
+			avgRatingStr,
+		})
+	}
+
+	// создание таблицы
+	table := widget.NewTable(
+		func() (int, int) {
+			return len(data) + 1, 7
+		},
+		func() fyne.CanvasObject {
+			// Создаем label с выравниванием по центру
+			label := widget.NewLabel("")
+			label.Alignment = fyne.TextAlignCenter
+			return label
+		},
+		func(i widget.TableCellID, o fyne.CanvasObject) {
+			label := o.(*widget.Label)
+			label.Alignment = fyne.TextAlignCenter // Выравнивание по центру
+
+			if i.Row == 0 {
+				headers := []string{"ID", "Название", "Алгоритм A", "Алгоритм B", "Результаты", "Клики", "Средний рейтинг"}
+				if i.Col < len(headers) {
+					label.SetText(headers[i.Col])
+					label.TextStyle = fyne.TextStyle{Bold: true}
+				}
+			} else {
+				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
+					label.SetText(data[i.Row-1][i.Col])
+					label.TextStyle = fyne.TextStyle{}
+				}
+			}
+		})
+
+	// настройка размеров столбцов
+	table.SetColumnWidth(0, 60)  // ID
+	table.SetColumnWidth(1, 160) // Name
+	table.SetColumnWidth(2, 130) // Algorithm A
+	table.SetColumnWidth(3, 130) // Algorithm B
+	table.SetColumnWidth(4, 120) // Total Results
+	table.SetColumnWidth(5, 120) // Total Clicks
+	table.SetColumnWidth(6, 130) // Avg Rating
+
+	// кнопка закрытия
+	closeBtn := widget.NewButton("Закрыть", func() {
+		summaryWin.Close()
+	})
+
+	// кнопка обновления
+	refreshBtn := widget.NewButton("Обновить", func() {
+		// Закрываем и открываем заново для обновления данных
+		summaryWin.Close()
+		mw.showSummaryWindow()
+	})
+
+	// создание контейнера с таблицей и кнопкой
+	content := container.NewBorder(nil, container.NewHBox(refreshBtn, closeBtn), nil, nil, table)
+	summaryWin.SetContent(content)
+	summaryWin.Show()
+}
+
+// // Обновленный метод showAlterTable
+// func (mw *MainWindow) showAlterTable() {
+// 	logger.Info("Открытие окна ALTER TABLE")
+// 	alterWin := NewAlterTableWindow(mw.rep, mw.window, func() {
+// 		// Callback для обновления главного окна после изменений в таблице
+// 		mw.showSuccessMessage("Структура таблицы успешно изменена")
+
+// 		// Обновляем все открытые окна данных
+// 		mw.RefreshAllWindows()
+// 	})
+// 	alterWin.Show()
+// }
+
+// Обновленный метод showAlterTable
 func (mw *MainWindow) showAlterTable() {
+	logger.Info("Открытие окна ALTER TABLE. Главное окно: %p", mw)
+
 	alterWin := NewAlterTableWindow(mw.rep, mw.window, func() {
+		logger.Info("Callback вызван! Главное окно: %p", mw)
 		// Callback для обновления главного окна после изменений в таблице
 		mw.showSuccessMessage("Структура таблицы успешно изменена")
 
 		// Обновляем все открытые окна данных
-		mw.refreshAllDataWindows()
+		logger.Info("Вызов RefreshAllWindows из callback")
+		mw.RefreshAllWindows()
 	})
 	alterWin.Show()
-}
-
-// Обновление всех открытых окон данных
-func (mw *MainWindow) refreshAllDataWindows() {
-	for _, dataWin := range mw.openDataWindows {
-		dataWin.refreshData()
-	}
-}
-
-// Добавление окна данных в список отслеживаемых
-func (mw *MainWindow) addDataWindow(window *DataDisplayWindow) {
-	mw.openDataWindows = append(mw.openDataWindows, window)
-}
-
-// Удаление окна данных из списка отслеживаемых
-func (mw *MainWindow) removeDataWindow(window *DataDisplayWindow) {
-	for i, win := range mw.openDataWindows {
-		if win == window {
-			mw.openDataWindows = append(mw.openDataWindows[:i], mw.openDataWindows[i+1:]...)
-			break
-		}
-	}
 }
 
 // Вспомогательный метод для показа сообщения об успехе
@@ -208,6 +429,22 @@ func (mw *MainWindow) updateLayout() {
 		mw.titleLabel.SetText("А/В Testing Platform")
 	}
 }
+
+// Заглушки для методов, которые должны быть реализованы
+// func (mw *MainWindow) createSchemaHandler() {
+// 	ctx := context.Background()
+// 	err := mw.rep.CreateSchema(ctx)
+// 	if err != nil {
+// 		dialog.ShowError(err, mw.window)
+// 	} else {
+// 		dialog.ShowInformation("Успех", "Схема базы данных успешно создана", mw.window)
+// 	}
+// }
+
+// func (mw *MainWindow) showDataInputDialog() {
+// 	// Здесь должна быть реализация диалога ввода данных
+// 	dialog.ShowInformation("В разработке", "Диалог ввода данных находится в разработке", mw.window)
+// }
 
 func (mw *MainWindow) Show() {
 	mw.window.Show()

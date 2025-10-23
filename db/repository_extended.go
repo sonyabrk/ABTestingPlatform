@@ -9,6 +9,17 @@ import (
 	"testing-platform/pkg/logger"
 )
 
+// GetTableSchema возвращает информацию о структуре таблицы
+func (r *Repository) GetTableSchema(ctx context.Context, tableName string) ([]models.ColumnInfo, error) {
+	return r.GetTableColumns(ctx, tableName)
+}
+
+// GetTableData возвращает все данные из таблицы
+func (r *Repository) GetTableData(ctx context.Context, tableName string) (*models.QueryResult, error) {
+	query := fmt.Sprintf("SELECT * FROM %s ORDER BY id DESC", tableName)
+	return r.ExecuteQuery(ctx, query)
+}
+
 // GetTables возвращает список всех таблиц в базе данных
 func (r *Repository) GetTables(ctx context.Context) ([]string, error) {
 	query := `
