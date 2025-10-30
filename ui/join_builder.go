@@ -101,6 +101,7 @@ func (j *JoinBuilderWindow) buildUI() {
 
 	j.filterInput = widget.NewEntry()
 	j.filterInput.SetPlaceHolder("Текст для фильтрации...")
+	j.filterInput.Resize(fyne.NewSize(400, 50))
 	j.filterInput.OnChanged = j.onFilterTextChanged
 
 	j.filterColumnSelect = widget.NewSelect([]string{"Все столбцы"}, nil)
@@ -149,6 +150,7 @@ func (j *JoinBuilderWindow) buildUI() {
 	// Кнопки для управления сортировкой и фильтрацией
 	sortFilterLabel := widget.NewLabel("Сортировка и фильтрация результатов:")
 	sortFilterLabel.TextStyle = fyne.TextStyle{Bold: true}
+	sortFilterLabel.Alignment = fyne.TextAlignCenter
 
 	resetSortFilterBtn := widget.NewButton("Сбросить сортировку/фильтр", j.resetSortFilter)
 
@@ -867,9 +869,9 @@ func (j *JoinBuilderWindow) buildJoinQuery() (string, error) {
 
 	mainTable := j.mainTableSelect.Selected
 	joinTable := j.joinTableSelect.Selected
-	joinType := strings.Replace(j.joinTypeSelect.Selected, " JOIN", "", 1)
+	joinType := j.joinTypeSelect.Selected // Убрана замена, оставляем полный тип JOIN
 
-	// Базовый JOIN
+	// Базовый JOIN - теперь используем полный тип JOIN (INNER JOIN, LEFT JOIN и т.д.)
 	query := fmt.Sprintf("SELECT * FROM %s %s %s ON %s.%s = %s.%s",
 		mainTable, joinType, joinTable,
 		mainTable, j.mainColumnSelect.Selected,
@@ -886,7 +888,7 @@ func (j *JoinBuilderWindow) buildJoinQuery() (string, error) {
 
 			if joinTypeWidget.Selected != "" && tableWidget.Selected != "" &&
 				mainColWidget.Selected != "" && joinColWidget.Selected != "" {
-				joinType := strings.Replace(joinTypeWidget.Selected, " JOIN", "", 1)
+				joinType := joinTypeWidget.Selected // Без замены, используем полный тип
 				query += fmt.Sprintf(" %s %s ON %s = %s.%s",
 					joinType, tableWidget.Selected,
 					mainColWidget.Selected, tableWidget.Selected, joinColWidget.Selected)

@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // DataDisplayWindow представляет окно отображения данных
@@ -185,6 +186,22 @@ func convertValueToString(value interface{}) string {
 		return ""
 	}
 
+	// Обработка pgtype.Numeric
+	if numeric, ok := value.(pgtype.Numeric); ok {
+		if !numeric.Valid {
+			return ""
+		}
+		// Преобразуем Numeric в float64 и форматируем
+		floatVal, err := numeric.Float64Value()
+		if err != nil {
+			return fmt.Sprintf("%v", numeric)
+		}
+		if !floatVal.Valid {
+			return ""
+		}
+		return fmt.Sprintf("%.2f", floatVal.Float64)
+	}
+
 	switch v := value.(type) {
 	case string:
 		return v
@@ -193,7 +210,10 @@ func convertValueToString(value interface{}) string {
 	case float32, float64:
 		return fmt.Sprintf("%.2f", v)
 	case bool:
-		return fmt.Sprintf("%t", v)
+		if v {
+			return "Да"
+		}
+		return "Нет"
 	case []string:
 		return strings.Join(v, ", ")
 	case []byte:
@@ -201,7 +221,14 @@ func convertValueToString(value interface{}) string {
 	case time.Time:
 		return v.Format("2006-01-02 15:04:05")
 	default:
-		return fmt.Sprintf("%v", v)
+		// Для других типов пробуем преобразовать в строку
+		str := fmt.Sprintf("%v", v)
+		// Пытаемся распарсить как число, если похоже на числовое значение
+		if strings.Contains(str, "Numeric") || strings.Contains(str, "pgtype") {
+			// Это внутреннее представление pgtype, пропускаем
+			return ""
+		}
+		return str
 	}
 }
 
@@ -213,10 +240,11 @@ func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
 
 	// Получаем динамические данные из таблицы experiments
 	query := "SELECT * FROM experiments"
+	var args []interface{}
+
 	if filter.AlgorithmA != "" || filter.AlgorithmB != "" || filter.IsActive != nil || !filter.StartDateFrom.IsZero() || !filter.StartDateTo.IsZero() {
 		query += " WHERE 1=1"
 		var conditions []string
-		var args []interface{}
 		argCount := 1
 
 		if filter.AlgorithmA != "" {
@@ -248,29 +276,79 @@ func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
 		if len(conditions) > 0 {
 			query += " AND " + strings.Join(conditions, " AND ")
 		}
-
-		query += " ORDER BY start_date DESC"
-
-		// Выполняем запрос с фильтрами
-		result, err := d.mainWindow.rep.ExecuteQuery(ctx, query)
-		if err != nil {
-			logger.Error("Ошибка получения экспериментов: %v", err)
-			dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), d.window)
-			return
-		}
-
-		d.createDynamicTable(result)
-	} else {
-		// Без фильтров - простой запрос
-		result, err := d.mainWindow.rep.ExecuteQuery(ctx, query+" ORDER BY start_date DESC")
-		if err != nil {
-			logger.Error("Ошибка получения экспериментов: %v", err)
-			dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), d.window)
-			return
-		}
-
-		d.createDynamicTable(result)
 	}
+
+	query += " ORDER BY start_date DESC"
+
+	// Выполняем запрос
+	var result *models.QueryResult
+	var err error
+
+	if len(args) > 0 {
+		// Если есть параметры, используем метод с поддержкой параметризованных запросов
+		result, err = d.executeQueryWithParams(ctx, query, args...)
+	} else {
+		// Без параметров - простой запрос
+		result, err = d.mainWindow.rep.ExecuteQuery(ctx, query)
+	}
+
+	if err != nil {
+		logger.Error("Ошибка получения экспериментов: %v", err)
+		dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), d.window)
+		return
+	}
+
+	d.createDynamicTable(result)
+}
+
+// executeQueryWithParams выполняет параметризованный запрос
+func (d *DataDisplayWindow) executeQueryWithParams(ctx context.Context, query string, args ...interface{}) (*models.QueryResult, error) {
+	logger.Info("Выполнение параметризованного запроса: %s с параметрами: %v", query, args)
+
+	// Начинаем транзакцию для безопасного выполнения
+	tx, err := d.mainWindow.rep.Pool().Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка начала транзакции: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return &models.QueryResult{Error: err.Error()}, nil
+	}
+	defer rows.Close()
+
+	// Получаем описание колонок
+	fieldDescriptions := rows.FieldDescriptions()
+	columns := make([]string, len(fieldDescriptions))
+	for i, fd := range fieldDescriptions {
+		columns[i] = string(fd.Name)
+	}
+
+	// Читаем данные
+	var resultRows []map[string]interface{}
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return &models.QueryResult{Error: err.Error()}, nil
+		}
+
+		row := make(map[string]interface{})
+		for i, col := range columns {
+			row[col] = values[i]
+		}
+		resultRows = append(resultRows, row)
+	}
+
+	// Коммитим транзакцию
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("ошибка коммита транзакции: %w", err)
+	}
+
+	return &models.QueryResult{
+		Columns: columns,
+		Rows:    resultRows,
+	}, nil
 }
 
 // createDynamicTable создает таблицу с динамическими столбцами
@@ -311,21 +389,61 @@ func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
 			// Первая строка - заголовки
 			if i.Row == 0 {
 				if i.Col < len(result.Columns) {
-					label.SetText(result.Columns[i.Col])
+					columnName := result.Columns[i.Col]
+					// Улучшаем отображение названий столбцов
+					if columnName == "user_percent" {
+						columnName = "Процент пользователей (%)"
+					} else if columnName == "algorithm_a" {
+						columnName = "Алгоритм A"
+					} else if columnName == "algorithm_b" {
+						columnName = "Алгоритм B"
+					} else if columnName == "is_active" {
+						columnName = "Активен"
+					} else if columnName == "start_date" {
+						columnName = "Дата начала"
+					}
+					label.SetText(columnName)
 					label.TextStyle = fyne.TextStyle{Bold: true}
 				}
 			} else {
 				// Данные
 				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
-					label.SetText(data[i.Row-1][i.Col])
+					text := data[i.Row-1][i.Col]
+
+					// Специальная обработка для boolean значений
+					if result.Columns[i.Col] == "is_active" {
+						if text == "true" {
+							text = "Да"
+						} else if text == "false" {
+							text = "Нет"
+						}
+					}
+
+					label.SetText(text)
 					label.TextStyle = fyne.TextStyle{}
 				}
 			}
 		})
 
-	// Устанавливаем размеры столбцов (можно сделать адаптивными)
+	// Настраиваем ширину столбцов в зависимости от содержания
 	for i := 0; i < len(result.Columns); i++ {
-		table.SetColumnWidth(i, 120) // Базовая ширина для всех столбцов
+		colName := result.Columns[i]
+		switch colName {
+		case "id":
+			table.SetColumnWidth(i, 60)
+		case "name":
+			table.SetColumnWidth(i, 200)
+		case "user_percent":
+			table.SetColumnWidth(i, 250) // Шире для нового названия
+		case "is_active":
+			table.SetColumnWidth(i, 100)
+		case "start_date":
+			table.SetColumnWidth(i, 150)
+		case "tags":
+			table.SetColumnWidth(i, 200)
+		default:
+			table.SetColumnWidth(i, 120)
+		}
 	}
 
 	// Обновление контейнера с таблицей
@@ -334,6 +452,68 @@ func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
 
 	logger.Info("Таблица обновлена: %d строк, %d столбцов", len(data), len(result.Columns))
 }
+
+// // createDynamicTable создает таблицу с динамическими столбцами
+// func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
+// 	if result.Error != "" {
+// 		logger.Error("Ошибка в результате запроса: %s", result.Error)
+// 		dialog.ShowError(fmt.Errorf("ошибка выполнения запроса: %s", result.Error), d.window)
+// 		return
+// 	}
+
+// 	// Подготавливаем данные для таблицы
+// 	data := make([][]string, 0)
+
+// 	// Добавляем строки данных
+// 	for _, row := range result.Rows {
+// 		rowData := make([]string, 0)
+// 		for _, col := range result.Columns {
+// 			value := row[col]
+// 			rowData = append(rowData, convertValueToString(value))
+// 		}
+// 		data = append(data, rowData)
+// 	}
+
+// 	// Создаем таблицу с динамическим количеством столбцов
+// 	table := widget.NewTable(
+// 		func() (int, int) {
+// 			return len(data) + 1, len(result.Columns) // +1 для заголовков
+// 		},
+// 		func() fyne.CanvasObject {
+// 			label := widget.NewLabel("")
+// 			label.Alignment = fyne.TextAlignCenter
+// 			return label
+// 		},
+// 		func(i widget.TableCellID, o fyne.CanvasObject) {
+// 			label := o.(*widget.Label)
+// 			label.Alignment = fyne.TextAlignCenter
+
+// 			// Первая строка - заголовки
+// 			if i.Row == 0 {
+// 				if i.Col < len(result.Columns) {
+// 					label.SetText(result.Columns[i.Col])
+// 					label.TextStyle = fyne.TextStyle{Bold: true}
+// 				}
+// 			} else {
+// 				// Данные
+// 				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
+// 					label.SetText(data[i.Row-1][i.Col])
+// 					label.TextStyle = fyne.TextStyle{}
+// 				}
+// 			}
+// 		})
+
+// 	// Устанавливаем размеры столбцов (можно сделать адаптивными)
+// 	for i := 0; i < len(result.Columns); i++ {
+// 		table.SetColumnWidth(i, 120) // Базовая ширина для всех столбцов
+// 	}
+
+// 	// Обновление контейнера с таблицей
+// 	d.tableContainer.Objects = []fyne.CanvasObject{table}
+// 	d.tableContainer.Refresh()
+
+// 	logger.Info("Таблица обновлена: %d строк, %d столбцов", len(data), len(result.Columns))
+// }
 
 func (d *DataDisplayWindow) Show() {
 	d.window.Show()

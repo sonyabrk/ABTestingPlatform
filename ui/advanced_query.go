@@ -111,6 +111,9 @@ func (a *AdvancedQueryWindow) buildUI() {
 		func(i widget.TableCellID, o fyne.CanvasObject) {},
 	)
 
+	columnScroll := container.NewScroll(a.columnList)
+	columnScroll.SetMinSize(fyne.NewSize(250, 300))
+
 	// Кнопки для управления условиями
 	addWhereBtn := widget.NewButton("Добавить условие WHERE", a.addWhereCondition)
 	addOrderByBtn := widget.NewButton("Добавить сортировку ORDER BY", a.addOrderByCondition)
@@ -138,13 +141,20 @@ func (a *AdvancedQueryWindow) buildUI() {
 	limitLabelTitle := widget.NewLabel("Ограничение результатов:")
 	limitLabelTitle.TextStyle = fyne.TextStyle{Bold: true}
 
-	// Компоновка
 	leftPanel := container.NewVBox(
-		widget.NewLabel("Таблица:"),
+		widget.NewLabelWithStyle("Таблица:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		a.tableSelect,
-		widget.NewLabel("Столбцы:"),
-		container.NewScroll(a.columnList),
+		widget.NewLabelWithStyle("Столбцы:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		columnScroll, // Используем увеличенный скролл-контейнер
 	)
+
+	// // Компоновка
+	// leftPanel := container.NewVBox(
+	// 	widget.NewLabel("Таблица:"),
+	// 	a.tableSelect,
+	// 	widget.NewLabel("Столбцы:"),
+	// 	container.NewScroll(a.columnList),
+	// )
 
 	conditionsPanel := container.NewVBox(
 		whereLabel,
@@ -179,11 +189,14 @@ func (a *AdvancedQueryWindow) buildUI() {
 	// Создаем HBox для основного расположения
 	controls := container.NewHBox(leftPanel, rightPanel)
 
+	resultScroll := container.NewScroll(a.resultTable)
+	resultScroll.SetMinSize(fyne.NewSize(800, 500))
+
 	content := container.NewBorder(
 		controls,
 		container.NewVBox(a.resultLabel, widget.NewLabel("SQL:"), a.sqlPreview),
 		nil, nil,
-		container.NewScroll(a.resultTable),
+		resultScroll,
 	)
 
 	a.window.SetContent(content)
@@ -809,7 +822,7 @@ func (a *AdvancedQueryWindow) displayResults(result *models.QueryResult) {
 
 	// Автоматически настраиваем ширину колонок
 	for col := 0; col < len(result.Columns); col++ {
-		maxWidth := float32(120) // Минимальная ширина
+		maxWidth := float32(150) // Минимальная ширина
 
 		// Учитываем ширину заголовка
 		headerWidth := float32(len(result.Columns[col])) * 8

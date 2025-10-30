@@ -55,32 +55,32 @@ func (r *Repository) RefreshConnection(ctx context.Context) error {
 
 // FixMigrations исправляет проблемы с миграциями
 func (r *Repository) FixMigrations(ctx context.Context) error {
-    logger.Info("Исправление проблем с миграциями")
-    
-    driver, err := postgres.WithInstance(r.db, &postgres.Config{})
-    if err != nil {
-        return fmt.Errorf("не удалось создать драйвер БД: %w", err)
-    }
-    
-    m, err := migrate.NewWithDatabaseInstance(
-        r.migrationsPath,
-        "postgres", driver)
-    if err != nil {
-        return fmt.Errorf("не удалось создать миграцию: %w", err)
-    }
+	logger.Info("Исправление проблем с миграциями")
 
-    // Пытаемся починить "грязное" состояние
-    if err := m.Force(3); err != nil {
-        logger.Warn("Не удалось принудительно установить версию 3: %v", err)
-    }
-    
-    // Применяем миграции
-    if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-        return fmt.Errorf("не удалось применить миграции: %w", err)
-    }
+	driver, err := postgres.WithInstance(r.db, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("не удалось создать драйвер БД: %w", err)
+	}
 
-    logger.Info("Проблемы с миграциями исправлены")
-    return nil
+	m, err := migrate.NewWithDatabaseInstance(
+		r.migrationsPath,
+		"postgres", driver)
+	if err != nil {
+		return fmt.Errorf("не удалось создать миграцию: %w", err)
+	}
+
+	// Пытаемся починить "грязное" состояние
+	if err := m.Force(3); err != nil {
+		logger.Warn("Не удалось принудительно установить версию 3: %v", err)
+	}
+
+	// Применяем миграции
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("не удалось применить миграции: %w", err)
+	}
+
+	logger.Info("Проблемы с миграциями исправлены")
+	return nil
 }
 
 // метод для создания структуры БД
@@ -212,6 +212,10 @@ func (r *Repository) AddResult(ctx context.Context, res *models.Result) error {
 	}
 	logger.Info("Результат для пользователя %d успешно добавлен", res.UserId)
 	return nil
+}
+
+func (r *Repository) Pool() *pgxpool.Pool {
+	return r.pool
 }
 
 // возвращение списка всех экспериментов

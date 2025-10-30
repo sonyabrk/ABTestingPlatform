@@ -9,16 +9,77 @@ import (
 	"testing-platform/pkg/logger"
 )
 
+// RefreshTableSchema обновляет информацию о структуре таблицы в кэше
+func (r *Repository) RefreshTableSchema(ctx context.Context, tableName string) error {
+	// Для PostgreSQL можно принудительно обновить информацию о таблице
+	// Выполняем простой запрос к таблице, чтобы обновить метаданные
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT 0", tableName)
+	_, err := r.ExecuteQuery(ctx, query)
+	if err != nil {
+		return fmt.Errorf("не удалось обновить структуру таблицы %s: %w", tableName, err)
+	}
+
+	logger.Info("Структура таблицы %s успешно обновлена", tableName)
+	return nil
+}
+
+// GetTableNames возвращает список всех таблиц в базе данных
+func (r *Repository) GetTableNames(ctx context.Context) ([]string, error) {
+	query := `
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        ORDER BY table_name
+    `
+
+	result, err := r.ExecuteQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	var tables []string
+	for _, row := range result.Rows {
+		if tableName, ok := row["table_name"].(string); ok {
+			tables = append(tables, tableName)
+		}
+	}
+
+	return tables, nil
+}
+
+// GetTableData возвращает все данные из таблицы с универсальной обработкой
+func (r *Repository) GetTableData(ctx context.Context, tableName string) (*models.QueryResult, error) {
+	query := fmt.Sprintf("SELECT * FROM %s ORDER BY id DESC", tableName)
+	return r.ExecuteQuery(ctx, query)
+}
+
+// В repository_extended.go добавьте:
+func (r *Repository) RefreshAllTableSchemas(ctx context.Context) error {
+	tables, err := r.GetTableNames(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, table := range tables {
+		if err := r.RefreshTableSchema(ctx, table); err != nil {
+			logger.Error("Ошибка обновления структуры таблицы %s: %v", table, err)
+		}
+	}
+
+	logger.Info("Структуры всех таблиц успешно обновлены")
+	return nil
+}
+
 // GetTableSchema возвращает информацию о структуре таблицы
 func (r *Repository) GetTableSchema(ctx context.Context, tableName string) ([]models.ColumnInfo, error) {
 	return r.GetTableColumns(ctx, tableName)
 }
 
 // GetTableData возвращает все данные из таблицы
-func (r *Repository) GetTableData(ctx context.Context, tableName string) (*models.QueryResult, error) {
-	query := fmt.Sprintf("SELECT * FROM %s ORDER BY id DESC", tableName)
-	return r.ExecuteQuery(ctx, query)
-}
+// func (r *Repository) GetTableData(ctx context.Context, tableName string) (*models.QueryResult, error) {
+// 	query := fmt.Sprintf("SELECT * FROM %s ORDER BY id DESC", tableName)
+// 	return r.ExecuteQuery(ctx, query)
+// }
 
 // GetTables возвращает список всех таблиц в базе данных
 func (r *Repository) GetTables(ctx context.Context) ([]string, error) {

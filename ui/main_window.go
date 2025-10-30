@@ -3,9 +3,12 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing-platform/db"
+	"testing-platform/db/models"
 	"testing-platform/pkg/logger"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -75,22 +78,6 @@ func (mw *MainWindow) CreateUI() {
 		showSummaryBtn,
 	)
 
-	// rightColumn := container.NewVBox(
-	// 	widget.NewLabelWithStyle("Функции БД", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-	// 	alterTableBtn,
-	// 	advancedQueryBtn,
-	// 	joinBuilderBtn,
-	// 	textSearchBtn,
-	// 	stringFunctionsBtn,
-	// )
-
-	// Временная кнопка для отладки
-	debugBtn := widget.NewButton("Отладка: Обновить все окна", func() {
-		logger.Info("Принудительное обновление всех окон")
-		mw.RefreshAllWindows()
-	})
-
-	// Добавьте эту кнопку в интерфейс, например:
 	rightColumn := container.NewVBox(
 		widget.NewLabelWithStyle("Функции БД", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		alterTableBtn,
@@ -98,8 +85,6 @@ func (mw *MainWindow) CreateUI() {
 		joinBuilderBtn,
 		textSearchBtn,
 		stringFunctionsBtn,
-		widget.NewSeparator(),
-		debugBtn, // Добавляем кнопку отладки
 	)
 
 	// Адаптивный контейнер - на маленьких экранах вертикально, на больших горизонтально
@@ -150,7 +135,6 @@ func (mw *MainWindow) addDataWindow(dw *DataDisplayWindow) {
 	}
 }
 
-// NotifyAllDataWindows уведомляет все открытые окна данных об изменениях
 func (mw *MainWindow) NotifyAllDataWindows() {
 	mw.dataMutex.Lock()
 	defer mw.dataMutex.Unlock()
@@ -159,17 +143,13 @@ func (mw *MainWindow) NotifyAllDataWindows() {
 
 	for i, dw := range mw.dataWindows {
 		logger.Info("  Обновление окна %d: %p", i, dw)
-		dw.RefreshData()
+		if dw != nil {
+			dw.RefreshData()
+		} else {
+			logger.Error("  Окно %d равно nil!", i)
+		}
 	}
 }
-
-// // Добавляем методы для управления окнами данных
-// func (mw *MainWindow) addDataWindow(dw *DataDisplayWindow) {
-// 	mw.dataMutex.Lock()
-// 	defer mw.dataMutex.Unlock()
-// 	logger.Info("Добавление окна данных в главное окно. Теперь окон: %d", len(mw.dataWindows)+1)
-// 	mw.dataWindows = append(mw.dataWindows, dw)
-// }
 
 func (mw *MainWindow) removeDataWindow(dw *DataDisplayWindow) {
 	mw.dataMutex.Lock()
@@ -203,17 +183,6 @@ func (mw *MainWindow) removeSummaryWindow(sw fyne.Window) {
 	}
 }
 
-// // NotifyAllDataWindows уведомляет все открытые окна данных об изменениях
-// func (mw *MainWindow) NotifyAllDataWindows() {
-// 	mw.dataMutex.Lock()
-// 	defer mw.dataMutex.Unlock()
-
-// 	logger.Info("Уведомление %d окон данных об обновлении", len(mw.dataWindows))
-// 	for _, dw := range mw.dataWindows {
-// 		dw.RefreshData()
-// 	}
-// }
-
 // NotifyAllSummaryWindows уведомляет все открытые сводные окна об изменениях
 func (mw *MainWindow) NotifyAllSummaryWindows() {
 	mw.summaryMutex.Lock()
@@ -232,6 +201,152 @@ func (mw *MainWindow) RefreshAllWindows() {
 	logger.Info("Обновление всех окон приложения")
 	mw.NotifyAllDataWindows()
 	mw.NotifyAllSummaryWindows()
+}
+
+// Вспомогательная функция для конвертации значений в строку
+func convertValueToStringUniversal(value interface{}) string {
+	if value == nil {
+		return "NULL"
+	}
+
+	switch v := value.(type) {
+	case string:
+		return v
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%d", v)
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", v)
+	case float32:
+		return fmt.Sprintf("%.2f", v)
+	case float64:
+		return fmt.Sprintf("%.2f", v)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case []string:
+		return strings.Join(v, ", ")
+	case []byte:
+		return string(v)
+	case time.Time:
+		return v.Format("2006-01-02 15:04:05")
+	default:
+		// Для неизвестных типов
+		str := fmt.Sprintf("%v", v)
+		return str
+	}
+}
+
+// Функция для отображения табличных данных
+func displayTableData(container *fyne.Container, result *models.QueryResult, tableName string) {
+	if len(result.Rows) == 0 {
+		// Создаем пустую таблицу с сообщением
+		table := widget.NewTable(
+			func() (int, int) { return 1, 1 },
+			func() fyne.CanvasObject {
+				label := widget.NewLabel("")
+				label.Wrapping = fyne.TextWrapWord
+				return label
+			},
+			func(i widget.TableCellID, o fyne.CanvasObject) {
+				label := o.(*widget.Label)
+				if i.Row == 0 && i.Col == 0 {
+					label.SetText("Таблица results пуста")
+				}
+			})
+		container.Objects = []fyne.CanvasObject{table}
+		container.Refresh()
+		return
+	}
+
+	// Создаем таблицу с динамическими столбцами
+	table := widget.NewTable(
+		func() (int, int) {
+			return len(result.Rows) + 1, len(result.Columns) // +1 для заголовков
+		},
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("")
+			label.Wrapping = fyne.TextWrapWord
+			return label
+		},
+		func(i widget.TableCellID, o fyne.CanvasObject) {
+			label := o.(*widget.Label)
+			label.Wrapping = fyne.TextWrapWord
+
+			// Первая строка - заголовки
+			if i.Row == 0 {
+				if i.Col < len(result.Columns) {
+					columnName := result.Columns[i.Col]
+					// Улучшаем отображение названий столбцов
+					switch columnName {
+					case "user_id":
+						columnName = "ID пользователя"
+					case "recommendation_id":
+						columnName = "ID рекомендации"
+					case "clicked":
+						columnName = "Кликнут"
+					case "clicked_at":
+						columnName = "Время клика"
+					case "rating":
+						columnName = "Рейтинг"
+					}
+					label.SetText(columnName)
+					label.TextStyle = fyne.TextStyle{Bold: true}
+				}
+			} else {
+				// Данные
+				rowIndex := i.Row - 1
+				if rowIndex < len(result.Rows) && i.Col < len(result.Columns) {
+					value := result.Rows[rowIndex][result.Columns[i.Col]]
+					text := convertValueToStringUniversal(value)
+
+					// Специальная обработка для boolean значений
+					if result.Columns[i.Col] == "clicked" {
+						if text == "true" {
+							text = "Да"
+						} else if text == "false" {
+							text = "Нет"
+						}
+					}
+
+					label.SetText(text)
+					label.TextStyle = fyne.TextStyle{}
+				}
+			}
+		})
+
+	// Автоматическая настройка ширины столбцов
+	for col := 0; col < len(result.Columns); col++ {
+		maxWidth := float32(150) // минимальная ширина
+
+		// Учитываем заголовок
+		headerWidth := float32(len(result.Columns[col])) * 8
+		if headerWidth > maxWidth {
+			maxWidth = headerWidth
+		}
+
+		// Учитываем данные (первые 20 строк)
+		for row := 0; row < len(result.Rows) && row < 20; row++ {
+			if value := result.Rows[row][result.Columns[col]]; value != nil {
+				text := convertValueToStringUniversal(value)
+				textWidth := float32(len(text)) * 7
+				if textWidth > maxWidth {
+					maxWidth = textWidth
+				}
+			}
+		}
+
+		// Ограничение максимальной ширины
+		if maxWidth > 500 {
+			maxWidth = 500
+		}
+
+		table.SetColumnWidth(col, maxWidth)
+	}
+
+	container.Objects = []fyne.CanvasObject{table}
+	container.Refresh()
 }
 
 // Создание меню
@@ -271,120 +386,89 @@ func (mw *MainWindow) showDataDisplayWindow() {
 }
 
 func (mw *MainWindow) showSummaryWindow() {
-	logger.Info("Открытие нового сводного окна")
-	// создание нового окна
-	summaryWin := mw.app.NewWindow("Сводные данные экспериментов")
-	summaryWin.Resize(fyne.NewSize(1000, 600))
+	logger.Info("Открытие окна результатов экспериментов")
+
+	// Создаем новое окно для отображения таблицы results
+	resultsWin := mw.app.NewWindow("Результаты экспериментов")
+	resultsWin.Resize(fyne.NewSize(1200, 700))
 
 	// Добавляем окно в список отслеживаемых
-	mw.addSummaryWindow(summaryWin)
+	mw.addSummaryWindow(resultsWin)
 
 	// Устанавливаем обработчик закрытия окна
-	summaryWin.SetOnClosed(func() {
-		mw.removeSummaryWindow(summaryWin)
+	resultsWin.SetOnClosed(func() {
+		mw.removeSummaryWindow(resultsWin)
 	})
 
-	// получение данных из репозитория
-	ctx := context.Background()
-	results, err := mw.rep.GetExperimentResultsWithDetails(ctx)
-	if err != nil {
-		logger.Error("Ошибка получения сводных данных: %v", err)
-		dialog.ShowError(fmt.Errorf("не удалось получить сводные данные, проверьте соединение с базой данных"), mw.window)
-		return
+	// Создаем контейнер для таблицы
+	tableContainer := container.NewStack()
+	resultLabel := widget.NewLabel("Загрузка данных...")
+	resultLabel.Wrapping = fyne.TextWrapWord
+
+	// Функция для загрузки и отображения данных
+	loadResultsData := func() {
+		resultLabel.SetText("Загрузка данных из таблицы results...")
+
+		ctx := context.Background()
+		result, err := mw.rep.GetTableData(ctx, "results")
+
+		if err != nil {
+			resultLabel.SetText("Ошибка загрузки: " + err.Error())
+			return
+		}
+
+		if result.Error != "" {
+			resultLabel.SetText("Ошибка БД: " + result.Error)
+			return
+		}
+
+		// Отображаем таблицу
+		displayTableData(tableContainer, result, "results")
+		resultLabel.SetText(fmt.Sprintf("Таблица 'results': %d строк, %d столбцов", len(result.Rows), len(result.Columns)))
 	}
 
-	// подготовка данных для таблицы
-	data := make([][]string, 0)
-	for _, res := range results {
-		avgRatingStr := fmt.Sprintf("%.2f", res.AvgRating)
-
-		data = append(data, []string{
-			fmt.Sprintf("%d", res.ID),
-			res.Name,
-			res.AlgorithmA,
-			res.AlgorithmB,
-			fmt.Sprintf("%d", res.TotalResults),
-			fmt.Sprintf("%d", res.TotalClicks),
-			avgRatingStr,
-		})
-	}
-
-	// создание таблицы
-	table := widget.NewTable(
-		func() (int, int) {
-			return len(data) + 1, 7
-		},
-		func() fyne.CanvasObject {
-			// Создаем label с выравниванием по центру
-			label := widget.NewLabel("")
-			label.Alignment = fyne.TextAlignCenter
-			return label
-		},
-		func(i widget.TableCellID, o fyne.CanvasObject) {
-			label := o.(*widget.Label)
-			label.Alignment = fyne.TextAlignCenter // Выравнивание по центру
-
-			if i.Row == 0 {
-				headers := []string{"ID", "Название", "Алгоритм A", "Алгоритм B", "Результаты", "Клики", "Средний рейтинг"}
-				if i.Col < len(headers) {
-					label.SetText(headers[i.Col])
-					label.TextStyle = fyne.TextStyle{Bold: true}
-				}
-			} else {
-				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
-					label.SetText(data[i.Row-1][i.Col])
-					label.TextStyle = fyne.TextStyle{}
-				}
-			}
-		})
-
-	// настройка размеров столбцов
-	table.SetColumnWidth(0, 60)  // ID
-	table.SetColumnWidth(1, 160) // Name
-	table.SetColumnWidth(2, 130) // Algorithm A
-	table.SetColumnWidth(3, 130) // Algorithm B
-	table.SetColumnWidth(4, 120) // Total Results
-	table.SetColumnWidth(5, 120) // Total Clicks
-	table.SetColumnWidth(6, 130) // Avg Rating
-
-	// кнопка закрытия
-	closeBtn := widget.NewButton("Закрыть", func() {
-		summaryWin.Close()
-	})
-
-	// кнопка обновления
+	// Кнопки управления
 	refreshBtn := widget.NewButton("Обновить", func() {
-		// Закрываем и открываем заново для обновления данных
-		summaryWin.Close()
-		mw.showSummaryWindow()
+		loadResultsData()
 	})
 
-	// создание контейнера с таблицей и кнопкой
-	content := container.NewBorder(nil, container.NewHBox(refreshBtn, closeBtn), nil, nil, table)
-	summaryWin.SetContent(content)
-	summaryWin.Show()
+	closeBtn := widget.NewButton("Закрыть", func() {
+		resultsWin.Close()
+	})
+
+	// Панель управления
+	controlPanel := container.NewHBox(
+		refreshBtn,
+		closeBtn,
+	)
+
+	// Основной контент
+	content := container.NewBorder(
+		container.NewVBox(resultLabel, controlPanel),
+		nil, nil, nil,
+		container.NewScroll(tableContainer),
+	)
+
+	resultsWin.SetContent(content)
+
+	// Первоначальная загрузка данных
+	loadResultsData()
+
+	resultsWin.Show()
 }
 
-// // Обновленный метод showAlterTable
-// func (mw *MainWindow) showAlterTable() {
-// 	logger.Info("Открытие окна ALTER TABLE")
-// 	alterWin := NewAlterTableWindow(mw.rep, mw.window, func() {
-// 		// Callback для обновления главного окна после изменений в таблице
-// 		mw.showSuccessMessage("Структура таблицы успешно изменена")
-
-// 		// Обновляем все открытые окна данных
-// 		mw.RefreshAllWindows()
-// 	})
-// 	alterWin.Show()
-// }
-
-// Обновленный метод showAlterTable
 func (mw *MainWindow) showAlterTable() {
 	logger.Info("Открытие окна ALTER TABLE. Главное окно: %p", mw)
 
 	alterWin := NewAlterTableWindow(mw.rep, mw.window, func() {
 		logger.Info("Callback вызван! Главное окно: %p", mw)
-		// Callback для обновления главного окна после изменений в таблице
+
+		// Принудительно обновляем структуры всех таблиц
+		ctx := context.Background()
+		if err := mw.rep.RefreshAllTableSchemas(ctx); err != nil {
+			logger.Error("Ошибка обновления структур таблиц: %v", err)
+		}
+
 		mw.showSuccessMessage("Структура таблицы успешно изменена")
 
 		// Обновляем все открытые окна данных
@@ -430,7 +514,7 @@ func (mw *MainWindow) updateLayout() {
 	}
 }
 
-// Заглушки для методов, которые должны быть реализованы
+// // Заглушки для методов, которые должны быть реализованы
 // func (mw *MainWindow) createSchemaHandler() {
 // 	ctx := context.Background()
 // 	err := mw.rep.CreateSchema(ctx)
@@ -469,14 +553,7 @@ func (mw *MainWindow) ShowInstructionDialog() {
     Результат:
     - ID пользователя: целое положительное число
     - ID рекомендации: обязательно, не длинее 255 символов (только буквы, цифры, дефисы и подчеркивания)
-    - Рейтинг: целое число от 0 до 5 (обязательно при клике)
-
-    Новые функции БД:
-    - ALTER TABLE: изменение структуры таблиц
-    - Расширенный SELECT: сложные запросы с фильтрацией
-    - Мастер JOIN: визуальное построение соединений
-    - Текстовый поиск: поиск по шаблонам и регулярным выражениям
-    - Функции работы со строками: преобразование текстовых данных`
+    - Рейтинг: целое число от 0 до 5 (обязательно при клике)`
 
 	text := widget.NewLabel(instructionText)
 	text.Wrapping = fyne.TextWrapWord

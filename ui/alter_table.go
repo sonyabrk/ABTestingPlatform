@@ -450,37 +450,57 @@ func (a *AlterTableWindow) buildAlterQuery() (string, error) {
 }
 
 func (a *AlterTableWindow) executeQuery(query string) {
-    err := a.repository.ExecuteAlter(context.Background(), query)
-    if err != nil {
-        a.showError(err)
-        return
-    }
+	err := a.repository.ExecuteAlter(context.Background(), query)
+	if err != nil {
+		a.showError(err)
+		return
+	}
 
-    // Обновляем интерфейс
-    a.refreshData()
-    a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
+	// Обновляем интерфейс
+	a.refreshData()
+	a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
 
-    // Специальная обработка для переименования таблицы
-    if a.actionSelect.Selected == "Переименовать таблицу" {
-        a.currentTable = a.newColumnName.Text
-    }
-
-    // Очищаем поля
-    a.columnName.SetText("")
-    a.newColumnName.SetText("")
-    a.constraintValue.SetText("")
-    a.defaultValue.SetText("")
-    a.referenceTable.SetText("")
-    a.referenceColumn.SetText("")
-
-    // ВАЖНО: Вызываем callback для обновления всех окон данных
-    logger.Info("Вызов callback onTableChanged. Функция установлена: %t", a.onTableChanged != nil)
-    if a.onTableChanged != nil {
-        a.onTableChanged()
-    } else {
-        logger.Error("Callback onTableChanged НЕ установлен!")
-    }
+	// ВАЖНО: Вызываем callback для обновления всех окон данных
+	logger.Info("Вызов callback onTableChanged. Функция установлена: %t", a.onTableChanged != nil)
+	if a.onTableChanged != nil {
+		a.onTableChanged()
+	} else {
+		logger.Error("Callback onTableChanged НЕ установлен!")
+	}
 }
+
+// func (a *AlterTableWindow) executeQuery(query string) {
+//     err := a.repository.ExecuteAlter(context.Background(), query)
+//     if err != nil {
+//         a.showError(err)
+//         return
+//     }
+
+//     // Обновляем интерфейс
+//     a.refreshData()
+//     a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
+
+//     // Специальная обработка для переименования таблицы
+//     if a.actionSelect.Selected == "Переименовать таблицу" {
+//         a.currentTable = a.newColumnName.Text
+//     }
+
+//     // Очищаем поля
+//     a.columnName.SetText("")
+//     a.newColumnName.SetText("")
+//     a.constraintValue.SetText("")
+//     a.defaultValue.SetText("")
+//     a.referenceTable.SetText("")
+//     a.referenceColumn.SetText("")
+
+//     // ВАЖНО: Вызываем callback для обновления всех окон данных
+//     logger.Info("Вызов callback onTableChanged. Функция установлена: %t", a.onTableChanged != nil)
+//     if a.onTableChanged != nil {
+//         a.onTableChanged()
+//     } else {
+//         logger.Error("Callback onTableChanged НЕ установлен!")
+//     }
+// }
 
 // func (a *AlterTableWindow) executeQuery(query string) {
 // 	err := a.repository.ExecuteAlter(context.Background(), query)
