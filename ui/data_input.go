@@ -21,19 +21,6 @@ func showUserError(win fyne.Window, msg string) {
 	dialog.ShowError(fmt.Errorf("%s", msg), win)
 }
 
-// // обработчик кнопки "Создать схему и таблицы"
-// func (mw *MainWindow) createSchemaHandler() {
-// 	ctx := context.Background()
-// 	err := mw.rep.CreateSchema(ctx)
-// 	if err != nil {
-// 		logger.Error("Ошибка создания схемы: %v", err)
-// 		showUserError(mw.window, "Не удалось создать схему БД: проверьте права доступа и соединение с базой данных")
-// 	} else {
-// 		dialog.ShowInformation("Успех", "Схема БД успешно создана", mw.window)
-// 		logger.Info("Схема БД успешно создана")
-// 	}
-// }
-
 // обработчик кнопки "Создать схему и таблицы"
 func (mw *MainWindow) createSchemaHandler() {
     ctx := context.Background()

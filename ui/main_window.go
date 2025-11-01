@@ -135,6 +135,59 @@ func (mw *MainWindow) addDataWindow(dw *DataDisplayWindow) {
 	}
 }
 
+// В методе showAlterTable обновите callback
+func (mw *MainWindow) showAlterTable() {
+	logger.Info("Открытие окна ALTER TABLE")
+
+	alterWin := NewAlterTableWindow(mw.rep, mw.window, func() {
+		logger.Info("=== CALLBACK: Обновление после ALTER TABLE ===")
+
+		// 1. Принудительно обновляем структуры всех таблиц
+		ctx := context.Background()
+		logger.Info("Принудительное обновление структур таблиц...")
+
+		if err := mw.rep.RefreshAllTableSchemas(ctx); err != nil {
+			logger.Error("Ошибка обновления структур таблиц: %v", err)
+			mw.showErrorMessage(fmt.Sprintf("Ошибка обновления структур таблиц: %v", err))
+		} else {
+			logger.Info("Структуры таблиц успешно обновлены")
+		}
+
+		// 2. Обновляем все открытые окна данных
+		logger.Info("Обновление всех окон данных...")
+		mw.RefreshAllWindows()
+
+		// 3. Дополнительная гарантия - обновление с задержкой
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			logger.Info("Дополнительное обновление через 500ms")
+			mw.RefreshAllWindows()
+		}()
+
+		logger.Info("=== CALLBACK ЗАВЕРШЕН ===")
+	})
+	alterWin.Show()
+}
+
+// В методе RefreshAllWindows добавьте обновление списка таблиц
+func (mw *MainWindow) RefreshAllWindows() {
+	logger.Info("Обновление всех окон приложения")
+
+	// Принудительно обновляем кэш таблиц
+	ctx := context.Background()
+	if err := mw.rep.RefreshAllTableSchemas(ctx); err != nil {
+		logger.Error("Ошибка обновления кэша таблиц: %v", err)
+	}
+
+	mw.NotifyAllDataWindows()
+	mw.NotifyAllSummaryWindows()
+}
+
+// Добавьте метод для показа ошибок
+func (mw *MainWindow) showErrorMessage(message string) {
+	dialog.ShowError(fmt.Errorf(message), mw.window)
+}
+
 func (mw *MainWindow) NotifyAllDataWindows() {
 	mw.dataMutex.Lock()
 	defer mw.dataMutex.Unlock()
@@ -194,13 +247,6 @@ func (mw *MainWindow) NotifyAllSummaryWindows() {
 		sw.Close()
 	}
 	mw.summaryWindows = make([]fyne.Window, 0)
-}
-
-// RefreshAllWindows обновляет все открытые окна
-func (mw *MainWindow) RefreshAllWindows() {
-	logger.Info("Обновление всех окон приложения")
-	mw.NotifyAllDataWindows()
-	mw.NotifyAllSummaryWindows()
 }
 
 // Вспомогательная функция для конвертации значений в строку
@@ -457,27 +503,6 @@ func (mw *MainWindow) showSummaryWindow() {
 	resultsWin.Show()
 }
 
-func (mw *MainWindow) showAlterTable() {
-	logger.Info("Открытие окна ALTER TABLE. Главное окно: %p", mw)
-
-	alterWin := NewAlterTableWindow(mw.rep, mw.window, func() {
-		logger.Info("Callback вызван! Главное окно: %p", mw)
-
-		// Принудительно обновляем структуры всех таблиц
-		ctx := context.Background()
-		if err := mw.rep.RefreshAllTableSchemas(ctx); err != nil {
-			logger.Error("Ошибка обновления структур таблиц: %v", err)
-		}
-
-		mw.showSuccessMessage("Структура таблицы успешно изменена")
-
-		// Обновляем все открытые окна данных
-		logger.Info("Вызов RefreshAllWindows из callback")
-		mw.RefreshAllWindows()
-	})
-	alterWin.Show()
-}
-
 // Вспомогательный метод для показа сообщения об успехе
 func (mw *MainWindow) showSuccessMessage(message string) {
 	infoDialog := dialog.NewInformation("Успех", message, mw.window)
@@ -513,22 +538,6 @@ func (mw *MainWindow) updateLayout() {
 		mw.titleLabel.SetText("А/В Testing Platform")
 	}
 }
-
-// // Заглушки для методов, которые должны быть реализованы
-// func (mw *MainWindow) createSchemaHandler() {
-// 	ctx := context.Background()
-// 	err := mw.rep.CreateSchema(ctx)
-// 	if err != nil {
-// 		dialog.ShowError(err, mw.window)
-// 	} else {
-// 		dialog.ShowInformation("Успех", "Схема базы данных успешно создана", mw.window)
-// 	}
-// }
-
-// func (mw *MainWindow) showDataInputDialog() {
-// 	// Здесь должна быть реализация диалога ввода данных
-// 	dialog.ShowInformation("В разработке", "Диалог ввода данных находится в разработке", mw.window)
-// }
 
 func (mw *MainWindow) Show() {
 	mw.window.Show()

@@ -22,6 +22,7 @@ type DataDisplayWindow struct {
 	tableContainer *fyne.Container
 	filterPanel    *fyne.Container
 	currentFilter  models.ExperimentFilter // Сохраняем текущий фильтр
+	tableName      string                  // НОВОЕ: храним имя таблицы
 }
 
 // NewDataDisplayWindow создает новое окно отображения данных
@@ -31,6 +32,7 @@ func NewDataDisplayWindow(mw *MainWindow) *DataDisplayWindow {
 	d := &DataDisplayWindow{
 		mainWindow: mw,
 		window:     mw.app.NewWindow("Данные экспериментов"),
+		tableName:  "experiments", // Устанавливаем таблицу по умолчанию
 	}
 
 	d.window.Resize(fyne.NewSize(1000, 700))
@@ -53,6 +55,19 @@ func NewDataDisplayWindow(mw *MainWindow) *DataDisplayWindow {
 func (d *DataDisplayWindow) buildUI() {
 	// создание контейнера для таблицы
 	d.tableContainer = container.NewStack()
+
+	// НОВОЕ: Выбор таблицы
+	tableSelect := widget.NewSelect([]string{}, func(selected string) {
+		if selected != "" {
+			d.tableName = selected
+			d.updateTable(d.currentFilter)
+			d.window.SetTitle("Данные таблицы: " + selected)
+		}
+	})
+	tableSelect.PlaceHolder = "Выберите таблицу"
+
+	// Загрузка списка таблиц
+	d.loadTableList(tableSelect)
 
 	// Элементы управления для фильтра (выпадающие списки и поля ввода)
 	algorithmA := widget.NewSelect([]string{"", "collaborative", "content_based", "hybrid", "popularity_based"}, nil)
@@ -109,8 +124,19 @@ func (d *DataDisplayWindow) buildUI() {
 		d.refreshData()
 	})
 
+	// НОВОЕ: Кнопка обновления списка таблиц
+	refreshTablesBtn := widget.NewButton("Обновить список таблиц", func() {
+		d.loadTableList(tableSelect)
+	})
+
 	// Создаем панель фильтров
 	d.filterPanel = container.NewVBox(
+		container.NewHBox(
+			widget.NewLabel("Таблица:"),
+			tableSelect,
+			refreshTablesBtn,
+		),
+		widget.NewSeparator(),
 		widget.NewLabel("Фильтры:"),
 		container.NewHBox(
 			container.NewVBox(
@@ -163,9 +189,43 @@ func (d *DataDisplayWindow) buildUI() {
 	d.window.SetContent(content)
 }
 
+// НОВЫЙ метод: загрузка списка таблиц
+func (d *DataDisplayWindow) loadTableList(tableSelect *widget.Select) {
+	tables, err := d.mainWindow.rep.GetTableNames(context.Background())
+	if err != nil {
+		logger.Error("Ошибка загрузки списка таблиц: %v", err)
+		dialog.ShowError(fmt.Errorf("не удалось загрузить список таблиц: %v", err), d.window)
+		return
+	}
+
+	// Сохраняем текущее выделение
+	currentSelection := tableSelect.Selected
+
+	tableSelect.Options = tables
+	tableSelect.Refresh()
+
+	// Восстанавливаем выделение, если таблица существует
+	if currentSelection != "" {
+		for _, table := range tables {
+			if table == currentSelection {
+				tableSelect.SetSelected(currentSelection)
+				d.tableName = currentSelection
+				break
+			}
+		}
+	} else if len(tables) > 0 && d.tableName == "" {
+		// Устанавливаем первую таблицу по умолчанию
+		tableSelect.SetSelected(tables[0])
+		d.tableName = tables[0]
+		d.window.SetTitle("Данные таблицы: " + d.tableName)
+	}
+
+	logger.Info("Список таблиц обновлен. Текущая таблица: %s", d.tableName)
+}
+
 // RefreshData принудительно обновляет данные в окне
 func (d *DataDisplayWindow) RefreshData() {
-	logger.Info("Обновление данных в окне отображения")
+	logger.Info("Обновление данных в окне отображения. Текущая таблица: %s", d.tableName)
 	d.refreshDataSilent()
 }
 
@@ -238,11 +298,38 @@ func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
 
 	ctx := context.Background()
 
-	// Получаем динамические данные из таблицы experiments
-	query := "SELECT * FROM experiments"
+	// Проверяем, что таблица существует
+	tables, err := d.mainWindow.rep.GetTableNames(ctx)
+	if err != nil {
+		logger.Error("Ошибка получения списка таблиц: %v", err)
+		dialog.ShowError(fmt.Errorf("не удалось получить список таблиц: %v", err), d.window)
+		return
+	}
+
+	// Проверяем, существует ли текущая таблица
+	tableExists := false
+	for _, table := range tables {
+		if table == d.tableName {
+			tableExists = true
+			break
+		}
+	}
+
+	if !tableExists {
+		logger.Warn("Таблица %s не найдена", d.tableName)
+		d.tableContainer.Objects = []fyne.CanvasObject{
+			widget.NewLabel(fmt.Sprintf("Таблица '%s' не найдена. Возможно, она была переименована или удалена.\n\nОбновите список таблиц.", d.tableName)),
+		}
+		d.tableContainer.Refresh()
+		return
+	}
+
+	// Получаем динамические данные из выбранной таблицы
+	query := fmt.Sprintf("SELECT * FROM %s", d.tableName)
 	var args []interface{}
 
-	if filter.AlgorithmA != "" || filter.AlgorithmB != "" || filter.IsActive != nil || !filter.StartDateFrom.IsZero() || !filter.StartDateTo.IsZero() {
+	// Применяем фильтры только для таблицы experiments
+	if d.tableName == "experiments" && (filter.AlgorithmA != "" || filter.AlgorithmB != "" || filter.IsActive != nil || !filter.StartDateFrom.IsZero() || !filter.StartDateTo.IsZero()) {
 		query += " WHERE 1=1"
 		var conditions []string
 		argCount := 1
@@ -278,23 +365,29 @@ func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
 		}
 	}
 
-	query += " ORDER BY start_date DESC"
+	query += " ORDER BY id DESC"
 
 	// Выполняем запрос
 	var result *models.QueryResult
-	var err error
+	var queryErr error
 
 	if len(args) > 0 {
 		// Если есть параметры, используем метод с поддержкой параметризованных запросов
-		result, err = d.executeQueryWithParams(ctx, query, args...)
+		result, queryErr = d.executeQueryWithParams(ctx, query, args...)
 	} else {
 		// Без параметров - простой запрос
-		result, err = d.mainWindow.rep.ExecuteQuery(ctx, query)
+		result, queryErr = d.mainWindow.rep.ExecuteQuery(ctx, query)
 	}
 
-	if err != nil {
-		logger.Error("Ошибка получения экспериментов: %v", err)
-		dialog.ShowError(fmt.Errorf("не удалось получить эксперименты, проверьте соединение с базой данных"), d.window)
+	if queryErr != nil {
+		logger.Error("Ошибка получения данных из таблицы %s: %v", d.tableName, queryErr)
+		dialog.ShowError(fmt.Errorf("не удалось получить данные из таблицы %s: %v", d.tableName, queryErr), d.window)
+		return
+	}
+
+	if result.Error != "" {
+		logger.Error("Ошибка в результате запроса: %s", result.Error)
+		dialog.ShowError(fmt.Errorf("ошибка выполнения запроса: %s", result.Error), d.window)
 		return
 	}
 
@@ -450,70 +543,8 @@ func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
 	d.tableContainer.Objects = []fyne.CanvasObject{table}
 	d.tableContainer.Refresh()
 
-	logger.Info("Таблица обновлена: %d строк, %d столбцов", len(data), len(result.Columns))
+	logger.Info("Таблица %s обновлена: %d строк, %d столбцов", d.tableName, len(data), len(result.Columns))
 }
-
-// // createDynamicTable создает таблицу с динамическими столбцами
-// func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
-// 	if result.Error != "" {
-// 		logger.Error("Ошибка в результате запроса: %s", result.Error)
-// 		dialog.ShowError(fmt.Errorf("ошибка выполнения запроса: %s", result.Error), d.window)
-// 		return
-// 	}
-
-// 	// Подготавливаем данные для таблицы
-// 	data := make([][]string, 0)
-
-// 	// Добавляем строки данных
-// 	for _, row := range result.Rows {
-// 		rowData := make([]string, 0)
-// 		for _, col := range result.Columns {
-// 			value := row[col]
-// 			rowData = append(rowData, convertValueToString(value))
-// 		}
-// 		data = append(data, rowData)
-// 	}
-
-// 	// Создаем таблицу с динамическим количеством столбцов
-// 	table := widget.NewTable(
-// 		func() (int, int) {
-// 			return len(data) + 1, len(result.Columns) // +1 для заголовков
-// 		},
-// 		func() fyne.CanvasObject {
-// 			label := widget.NewLabel("")
-// 			label.Alignment = fyne.TextAlignCenter
-// 			return label
-// 		},
-// 		func(i widget.TableCellID, o fyne.CanvasObject) {
-// 			label := o.(*widget.Label)
-// 			label.Alignment = fyne.TextAlignCenter
-
-// 			// Первая строка - заголовки
-// 			if i.Row == 0 {
-// 				if i.Col < len(result.Columns) {
-// 					label.SetText(result.Columns[i.Col])
-// 					label.TextStyle = fyne.TextStyle{Bold: true}
-// 				}
-// 			} else {
-// 				// Данные
-// 				if i.Row-1 < len(data) && i.Col < len(data[i.Row-1]) {
-// 					label.SetText(data[i.Row-1][i.Col])
-// 					label.TextStyle = fyne.TextStyle{}
-// 				}
-// 			}
-// 		})
-
-// 	// Устанавливаем размеры столбцов (можно сделать адаптивными)
-// 	for i := 0; i < len(result.Columns); i++ {
-// 		table.SetColumnWidth(i, 120) // Базовая ширина для всех столбцов
-// 	}
-
-// 	// Обновление контейнера с таблицей
-// 	d.tableContainer.Objects = []fyne.CanvasObject{table}
-// 	d.tableContainer.Refresh()
-
-// 	logger.Info("Таблица обновлена: %d строк, %d столбцов", len(data), len(result.Columns))
-// }
 
 func (d *DataDisplayWindow) Show() {
 	d.window.Show()

@@ -11,11 +11,15 @@ import (
 
 // RefreshTableSchema обновляет информацию о структуре таблицы в кэше
 func (r *Repository) RefreshTableSchema(ctx context.Context, tableName string) error {
-	// Для PostgreSQL можно принудительно обновить информацию о таблице
-	// Выполняем простой запрос к таблице, чтобы обновить метаданные
+	// Выполняем запрос, который обновит метаданные таблицы в драйвере
 	query := fmt.Sprintf("SELECT * FROM %s LIMIT 0", tableName)
 	_, err := r.ExecuteQuery(ctx, query)
 	if err != nil {
+		// Если таблица не найдена, возможно она была переименована - это нормально
+		if strings.Contains(err.Error(), "не существует") {
+			logger.Warn("Таблица %s не найдена, возможно была переименована", tableName)
+			return nil
+		}
 		return fmt.Errorf("не удалось обновить структуру таблицы %s: %w", tableName, err)
 	}
 
@@ -23,7 +27,32 @@ func (r *Repository) RefreshTableSchema(ctx context.Context, tableName string) e
 	return nil
 }
 
-// GetTableNames возвращает список всех таблиц в базе данных
+// RefreshAllTableSchemas обновляет структуры всех таблиц
+func (r *Repository) RefreshAllTableSchemas(ctx context.Context) error {
+	logger.Info("Начало принудительного обновления структур всех таблиц")
+
+	// Получаем актуальный список таблиц
+	tables, err := r.GetTableNames(ctx)
+	if err != nil {
+		logger.Error("Ошибка получения списка таблиц: %v", err)
+		return err
+	}
+
+	logger.Info("Найдено таблиц для обновления: %v", tables)
+
+	// Обновляем каждую таблицу
+	for _, table := range tables {
+		if err := r.RefreshTableSchema(ctx, table); err != nil {
+			logger.Error("Ошибка обновления структуры таблицы %s: %v", table, err)
+			// Продолжаем обновление других таблиц
+		}
+	}
+
+	logger.Info("Структуры всех таблиц успешно обновлены")
+	return nil
+}
+
+// GetTableNames возвращает актуальный список таблиц
 func (r *Repository) GetTableNames(ctx context.Context) ([]string, error) {
 	query := `
         SELECT table_name 
@@ -32,20 +61,102 @@ func (r *Repository) GetTableNames(ctx context.Context) ([]string, error) {
         ORDER BY table_name
     `
 
-	result, err := r.ExecuteQuery(ctx, query)
+	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
-		return nil, err
+		logger.Error("Ошибка при получении списка таблиц: %v", err)
+		return nil, fmt.Errorf("не удалось получить список таблиц: %w", err)
 	}
+	defer rows.Close()
 
 	var tables []string
-	for _, row := range result.Rows {
-		if tableName, ok := row["table_name"].(string); ok {
-			tables = append(tables, tableName)
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			return nil, err
 		}
+		tables = append(tables, table)
 	}
 
+	logger.Info("Получено таблиц из БД: %v", tables)
 	return tables, nil
 }
+
+// // GetTableNames возвращает список всех таблиц в базе данных
+// func (r *Repository) GetTableNames(ctx context.Context) ([]string, error) {
+// 	query := `
+//         SELECT table_name
+//         FROM information_schema.tables
+//         WHERE table_schema = 'public'
+//         ORDER BY table_name
+//     `
+
+// 	result, err := r.ExecuteQuery(ctx, query)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	var tables []string
+// 	for _, row := range result.Rows {
+// 		if tableName, ok := row["table_name"].(string); ok {
+// 			tables = append(tables, tableName)
+// 		}
+// 	}
+
+// 	return tables, nil
+// }
+
+// // RefreshAllTableSchemas обновляет структуры всех таблиц
+// func (r *Repository) RefreshAllTableSchemas(ctx context.Context) error {
+//     logger.Info("Начало обновления структур всех таблиц")
+
+//     tables, err := r.GetTableNames(ctx)
+//     if err != nil {
+//         logger.Error("Ошибка получения списка таблиц: %v", err)
+//         return err
+//     }
+
+//     logger.Info("Найдено таблиц для обновления: %d", len(tables))
+
+//     for i, table := range tables {
+//         logger.Info("Обновление таблицы %d/%d: %s", i+1, len(tables), table)
+//         if err := r.RefreshTableSchema(ctx, table); err != nil {
+//             logger.Error("Ошибка обновления структуры таблицы %s: %v", table, err)
+//             // Продолжаем обновление других таблиц
+//         }
+//     }
+
+//     logger.Info("Структуры всех таблиц успешно обновлены")
+//     return nil
+// }
+
+// // GetTableNames возвращает актуальный список таблиц
+// func (r *Repository) GetTableNames(ctx context.Context) ([]string, error) {
+// 	query := `
+//         SELECT table_name
+//         FROM information_schema.tables
+//         WHERE table_schema = 'public'
+//         ORDER BY table_name
+//     `
+
+// 	rows, err := r.pool.Query(ctx, query)
+// 	if err != nil {
+// 		logger.Error("Ошибка при получении списка таблиц: %v", err)
+// 		return nil, fmt.Errorf("не удалось получить список таблиц: %w", err)
+// 	}
+// 	defer rows.Close()
+
+// 	var tables []string
+// 	for rows.Next() {
+// 		var table string
+// 		if err := rows.Scan(&table); err != nil {
+// 			return nil, err
+// 		}
+// 		tables = append(tables, table)
+// 	}
+
+// 	logger.Info("Получено таблиц из БД: %d", len(tables))
+// 	return tables, nil
+// }
 
 // GetTableData возвращает все данные из таблицы с универсальной обработкой
 func (r *Repository) GetTableData(ctx context.Context, tableName string) (*models.QueryResult, error) {
@@ -53,22 +164,22 @@ func (r *Repository) GetTableData(ctx context.Context, tableName string) (*model
 	return r.ExecuteQuery(ctx, query)
 }
 
-// В repository_extended.go добавьте:
-func (r *Repository) RefreshAllTableSchemas(ctx context.Context) error {
-	tables, err := r.GetTableNames(ctx)
-	if err != nil {
-		return err
-	}
+// // В repository_extended.go добавьте:
+// func (r *Repository) RefreshAllTableSchemas(ctx context.Context) error {
+// 	tables, err := r.GetTableNames(ctx)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	for _, table := range tables {
-		if err := r.RefreshTableSchema(ctx, table); err != nil {
-			logger.Error("Ошибка обновления структуры таблицы %s: %v", table, err)
-		}
-	}
+// 	for _, table := range tables {
+// 		if err := r.RefreshTableSchema(ctx, table); err != nil {
+// 			logger.Error("Ошибка обновления структуры таблицы %s: %v", table, err)
+// 		}
+// 	}
 
-	logger.Info("Структуры всех таблиц успешно обновлены")
-	return nil
-}
+// 	logger.Info("Структуры всех таблиц успешно обновлены")
+// 	return nil
+// }
 
 // GetTableSchema возвращает информацию о структуре таблицы
 func (r *Repository) GetTableSchema(ctx context.Context, tableName string) ([]models.ColumnInfo, error) {

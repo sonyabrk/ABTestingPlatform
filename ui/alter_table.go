@@ -17,7 +17,7 @@ type AlterTableWindow struct {
 	window         fyne.Window
 	repository     *db.Repository
 	mainWindow     fyne.Window
-	onTableChanged func() // Callback для обновления главного окна
+	onTableChanged func()
 
 	// Элементы управления
 	tableSelect     *widget.Select
@@ -195,45 +195,6 @@ func (a *AlterTableWindow) hideAllContainers() {
 	a.referenceContainer.Hide()
 }
 
-func (a *AlterTableWindow) refreshData() {
-	a.loadTables()
-	a.resultLabel.SetText("Данные обновлены")
-
-	// Вызываем callback для обновления главного окна
-	if a.onTableChanged != nil {
-		a.onTableChanged()
-	}
-}
-
-func (a *AlterTableWindow) loadTables() {
-	tables, err := a.repository.GetTables(context.Background())
-	if err != nil {
-		a.showError(err)
-		return
-	}
-
-	// Сохраняем текущее выделение
-	currentSelection := a.tableSelect.Selected
-
-	a.tableSelect.Options = tables
-	a.tableSelect.Refresh()
-
-	// Восстанавливаем выделение, если таблица еще существует
-	if currentSelection != "" {
-		for _, table := range tables {
-			if table == currentSelection {
-				a.tableSelect.SetSelected(currentSelection)
-				break
-			}
-		}
-	}
-}
-
-func (a *AlterTableWindow) onTableSelected(table string) {
-	a.currentTable = table
-	a.resultLabel.SetText(fmt.Sprintf("Выбрана таблица: %s", table))
-}
-
 func (a *AlterTableWindow) onActionSelected(action string) {
 	// Скрываем все поля сначала
 	a.hideAllContainers()
@@ -269,7 +230,7 @@ func (a *AlterTableWindow) onActionSelected(action string) {
 	case "Изменить тип данных":
 		a.columnNameContainer.Show()
 		a.dataTypeContainer.Show()
-		a.resultLabel.SetText("Выберите столбец и новый тип данных")
+		a.resultLabel.SetText("Выберите столбец и новый тип данных. ВНИМАНИЕ: Все данные в столбце будут удалены!")
 
 	case "Добавить ограничение":
 		a.columnNameContainer.Show()
@@ -285,6 +246,224 @@ func (a *AlterTableWindow) onActionSelected(action string) {
 		a.newColumnNameContainer.Show()
 		a.newColumnName.SetPlaceHolder("Новое имя таблицы")
 		a.resultLabel.SetText("Введите новое имя таблицы")
+	}
+}
+
+func (a *AlterTableWindow) executeQuery(query string) {
+	// Сохраняем информацию о текущем состоянии ДО выполнения запроса
+	oldTableName := a.currentTable
+	action := a.actionSelect.Selected
+
+	logger.Info("Выполнение ALTER запроса: %s", query)
+	logger.Info("Действие: %s, Текущая таблица: %s", action, oldTableName)
+
+	// Проверяем существование таблицы перед выполнением
+	tables, err := a.repository.GetTableNames(context.Background())
+	if err != nil {
+		a.showError(fmt.Errorf("не удалось проверить существование таблицы: %v", err))
+		return
+	}
+
+	tableExists := false
+	for _, table := range tables {
+		if table == oldTableName {
+			tableExists = true
+			break
+		}
+	}
+
+	if !tableExists && action != "Переименовать таблицу" {
+		a.showError(fmt.Errorf("таблица %s не существует", oldTableName))
+		return
+	}
+
+	err = a.repository.ExecuteAlter(context.Background(), query)
+	if err != nil {
+		a.showError(err)
+		return
+	}
+
+	// ОСОБАЯ ОБРАБОТКА ДЛЯ ПЕРЕИМЕНОВАНИЯ ТАБЛИЦЫ
+	if action == "Переименовать таблицу" {
+		newTableName := strings.TrimSpace(a.newColumnName.Text)
+
+		if newTableName == "" {
+			logger.Error("Новое имя таблицы пустое")
+			a.resultLabel.SetText("❌ Ошибка: новое имя таблицы не может быть пустым")
+			return
+		}
+
+		logger.Info("Обработка переименования таблицы: %s -> %s", oldTableName, newTableName)
+
+		// 1. Обновляем текущую таблицу в интерфейсе
+		a.currentTable = newTableName
+		logger.Info("Текущая таблица обновлена: %s", a.currentTable)
+
+		// 2. Принудительно обновляем список таблиц
+		a.loadTables()
+
+		// 3. Устанавливаем новую таблицу как выбранную
+		a.tableSelect.SetSelected(newTableName)
+		logger.Info("Установлена новая таблица в селекторе: %s", newTableName)
+
+		// 4. Обновляем результат
+		a.resultLabel.SetText(fmt.Sprintf("✅ Таблица успешно переименована: %s -> %s\nSQL: %s",
+			oldTableName, newTableName, query))
+	} else {
+		// Для других действий стандартное сообщение
+		a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
+	}
+
+	// Очищаем поля
+	a.columnName.SetText("")
+	a.newColumnName.SetText("")
+	a.constraintValue.SetText("")
+	a.defaultValue.SetText("")
+	a.referenceTable.SetText("")
+	a.referenceColumn.SetText("")
+
+	// ВАЖНО: Вызываем callback для обновления всех окон данных
+	logger.Info("Вызов callback onTableChanged после ALTER операции")
+	if a.onTableChanged != nil {
+		a.onTableChanged()
+	} else {
+		logger.Error("Callback onTableChanged не установлен!")
+	}
+}
+
+// НОВЫЙ метод для изменения типа данных через удаление и создание столбца
+func (a *AlterTableWindow) changeDataType() {
+	columnName := strings.TrimSpace(a.columnName.Text)
+	newDataType := a.dataType.Selected
+
+	if columnName == "" {
+		a.showError(fmt.Errorf("не указано имя столбца"))
+		return
+	}
+	if newDataType == "" {
+		a.showError(fmt.Errorf("не выбран тип данных"))
+		return
+	}
+
+	// Создаем транзакцию для безопасного выполнения
+	ctx := context.Background()
+	tx, err := a.repository.Pool().Begin(ctx)
+	if err != nil {
+		a.showError(fmt.Errorf("ошибка начала транзакции: %w", err))
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Шаг 1: Удаляем столбец
+	dropQuery := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", a.currentTable, columnName)
+	logger.Info("Удаление столбца: %s", dropQuery)
+
+	_, err = tx.Exec(ctx, dropQuery)
+	if err != nil {
+		a.showError(fmt.Errorf("ошибка удаления столбца: %w", err))
+		return
+	}
+
+	// Шаг 2: Создаем столбец заново с новым типом
+	addQuery := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", a.currentTable, columnName, newDataType)
+	logger.Info("Создание столбца с новым типом: %s", addQuery)
+
+	_, err = tx.Exec(ctx, addQuery)
+	if err != nil {
+		a.showError(fmt.Errorf("ошибка создания столбца: %w", err))
+		return
+	}
+
+	// Коммитим транзакцию
+	if err := tx.Commit(ctx); err != nil {
+		a.showError(fmt.Errorf("ошибка коммита транзакции: %w", err))
+		return
+	}
+
+	// Успешное завершение
+	a.resultLabel.SetText(fmt.Sprintf("✅ Тип данных столбца '%s' успешно изменен на '%s'\n\nВыполненные операции:\n1. %s\n2. %s",
+		columnName, newDataType, dropQuery, addQuery))
+
+	// Очищаем поля
+	a.columnName.SetText("")
+	a.dataType.SetSelected("")
+
+	// Вызываем callback для обновления всех окон
+	if a.onTableChanged != nil {
+		a.onTableChanged()
+	}
+
+	logger.Info("Тип данных столбца %s успешно изменен на %s", columnName, newDataType)
+}
+
+func (a *AlterTableWindow) loadTables() {
+	logger.Info("Загрузка списка таблиц...")
+
+	tables, err := a.repository.GetTableNames(context.Background())
+	if err != nil {
+		logger.Error("Ошибка загрузки таблиц: %v", err)
+		a.showError(err)
+		return
+	}
+
+	logger.Info("Получены таблицы из БД: %v", tables)
+
+	// Сохраняем текущее выделение
+	currentSelection := a.tableSelect.Selected
+	logger.Info("Текущее выделение до обновления: %s", currentSelection)
+
+	// Обновляем список таблиц
+	a.tableSelect.Options = tables
+	a.tableSelect.Refresh()
+
+	// Восстанавливаем выделение, если таблица еще существует
+	if currentSelection != "" {
+		found := false
+		for _, table := range tables {
+			if table == currentSelection {
+				a.tableSelect.SetSelected(currentSelection)
+				logger.Info("Восстановлено выделение таблицы: %s", currentSelection)
+				found = true
+				break
+			}
+		}
+		if !found {
+			logger.Warn("Таблица %s не найдена в новом списке", currentSelection)
+			// Если таблица не найдена, выбираем первую из списка
+			if len(tables) > 0 {
+				a.tableSelect.SetSelected(tables[0])
+				a.currentTable = tables[0]
+				logger.Info("Установлена первая таблица из списка: %s", tables[0])
+			}
+		}
+	} else if len(tables) > 0 {
+		// Если нет текущего выделения, выбираем первую таблицу
+		a.tableSelect.SetSelected(tables[0])
+		a.currentTable = tables[0]
+		logger.Info("Установлена первая таблица: %s", tables[0])
+	}
+
+	logger.Info("Загрузка таблиц завершена. Текущая таблица: %s", a.currentTable)
+}
+
+func (a *AlterTableWindow) onTableSelected(table string) {
+	if table == "" {
+		logger.Warn("Пустое имя таблицы в onTableSelected")
+		return
+	}
+
+	a.currentTable = table
+	logger.Info("Таблица выбрана: %s", table)
+	a.resultLabel.SetText(fmt.Sprintf("Выбрана таблица: %s", table))
+}
+
+func (a *AlterTableWindow) refreshData() {
+	a.loadTables()
+	a.resultLabel.SetText("Данные обновлены")
+
+	// Вызываем callback для обновления главного окна
+	if a.onTableChanged != nil {
+		a.onTableChanged()
 	}
 }
 
@@ -412,8 +591,9 @@ func (a *AlterTableWindow) buildAlterQuery() (string, error) {
 			a.currentTable, a.columnName.Text, a.newColumnName.Text)
 
 	case "Изменить тип данных":
-		query = fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s",
-			a.currentTable, a.columnName.Text, a.dataType.Selected)
+		// Для изменения типа данных используем специальный метод changeDataType
+		// Здесь возвращаем пустую строку, так как обработка будет в applyChanges
+		return "", nil
 
 	case "Добавить ограничение":
 		constraintName := fmt.Sprintf("%s_%s_%s",
@@ -449,101 +629,37 @@ func (a *AlterTableWindow) buildAlterQuery() (string, error) {
 	return query, nil
 }
 
-func (a *AlterTableWindow) executeQuery(query string) {
-	err := a.repository.ExecuteAlter(context.Background(), query)
-	if err != nil {
-		a.showError(err)
+func (a *AlterTableWindow) applyChanges() {
+	action := a.actionSelect.Selected
+
+	// ОСОБАЯ ОБРАБОТКА ДЛЯ ИЗМЕНЕНИЯ ТИПА ДАННЫХ
+	if action == "Изменить тип данных" {
+		// Показываем предупреждение о потере данных
+		dialog.ShowConfirm("Внимание: Потеря данных",
+			fmt.Sprintf("Изменение типа данных столбца '%s' приведет к ПОЛНОЙ ПОТЕРЕ всех данных в этом столбце!\n\nПродолжить?",
+				a.columnName.Text),
+			func(confirmed bool) {
+				if confirmed {
+					a.changeDataType()
+				}
+			}, a.window)
 		return
 	}
 
-	// Обновляем интерфейс
-	a.refreshData()
-	a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
-
-	// ВАЖНО: Вызываем callback для обновления всех окон данных
-	logger.Info("Вызов callback onTableChanged. Функция установлена: %t", a.onTableChanged != nil)
-	if a.onTableChanged != nil {
-		a.onTableChanged()
-	} else {
-		logger.Error("Callback onTableChanged НЕ установлен!")
-	}
-}
-
-// func (a *AlterTableWindow) executeQuery(query string) {
-//     err := a.repository.ExecuteAlter(context.Background(), query)
-//     if err != nil {
-//         a.showError(err)
-//         return
-//     }
-
-//     // Обновляем интерфейс
-//     a.refreshData()
-//     a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
-
-//     // Специальная обработка для переименования таблицы
-//     if a.actionSelect.Selected == "Переименовать таблицу" {
-//         a.currentTable = a.newColumnName.Text
-//     }
-
-//     // Очищаем поля
-//     a.columnName.SetText("")
-//     a.newColumnName.SetText("")
-//     a.constraintValue.SetText("")
-//     a.defaultValue.SetText("")
-//     a.referenceTable.SetText("")
-//     a.referenceColumn.SetText("")
-
-//     // ВАЖНО: Вызываем callback для обновления всех окон данных
-//     logger.Info("Вызов callback onTableChanged. Функция установлена: %t", a.onTableChanged != nil)
-//     if a.onTableChanged != nil {
-//         a.onTableChanged()
-//     } else {
-//         logger.Error("Callback onTableChanged НЕ установлен!")
-//     }
-// }
-
-// func (a *AlterTableWindow) executeQuery(query string) {
-// 	err := a.repository.ExecuteAlter(context.Background(), query)
-// 	if err != nil {
-// 		a.showError(err)
-// 		return
-// 	}
-
-// 	// Обновляем интерфейс
-// 	a.refreshData()
-// 	a.resultLabel.SetText("✅ Изменения успешно применены!\nSQL: " + query)
-
-// 	// Специальная обработка для переименования таблицы
-// 	if a.actionSelect.Selected == "Переименовать таблицу" {
-// 		a.currentTable = a.newColumnName.Text
-// 	}
-
-// 	// Очищаем поля
-// 	a.columnName.SetText("")
-// 	a.newColumnName.SetText("")
-// 	a.constraintValue.SetText("")
-// 	a.defaultValue.SetText("")
-// 	a.referenceTable.SetText("")
-// 	a.referenceColumn.SetText("")
-
-// 	// ВАЖНО: Вызываем callback для обновления всех окон данных
-// 	if a.onTableChanged != nil {
-// 		logger.Info("Вызов callback для обновления интерфейса")
-// 		a.onTableChanged()
-// 	} else {
-// 		logger.Error("Callback onTableChanged не установлен!")
-// 	}
-// }
-
-func (a *AlterTableWindow) applyChanges() {
+	// Для остальных действий используем стандартную логику
 	query, err := a.buildAlterQuery()
 	if err != nil {
 		a.showError(err)
 		return
 	}
 
+	// Если для изменения типа данных вернулась пустая строка, значит что-то пошло не так
+	if action == "Изменить тип данных" && query == "" {
+		a.showError(fmt.Errorf("не удалось построить запрос для изменения типа данных"))
+		return
+	}
+
 	// Подтверждение для деструктивных операций
-	action := a.actionSelect.Selected
 	if action == "Удалить столбец" || action == "Удалить ограничение" {
 		dialog.ShowConfirm("Подтверждение",
 			fmt.Sprintf("Вы уверены, что хотите выполнить действие: %s?\n\nSQL: %s", action, query),
@@ -558,6 +674,26 @@ func (a *AlterTableWindow) applyChanges() {
 }
 
 func (a *AlterTableWindow) showSQL() {
+	action := a.actionSelect.Selected
+
+	// ОСОБАЯ ОБРАБОТКА ДЛЯ ИЗМЕНЕНИЯ ТИПА ДАННЫХ
+	if action == "Изменить тип данных" {
+		columnName := strings.TrimSpace(a.columnName.Text)
+		newDataType := a.dataType.Selected
+
+		if columnName == "" || newDataType == "" {
+			a.resultLabel.SetText("Заполните имя столбца и выберите тип данных")
+			return
+		}
+
+		dropQuery := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", a.currentTable, columnName)
+		addQuery := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", a.currentTable, columnName, newDataType)
+
+		a.resultLabel.SetText(fmt.Sprintf("Будут выполнены два запроса:\n\n1. %s\n\n2. %s", dropQuery, addQuery))
+		return
+	}
+
+	// Для остальных действий стандартная логика
 	query, err := a.buildAlterQuery()
 	if err != nil {
 		a.showError(err)
