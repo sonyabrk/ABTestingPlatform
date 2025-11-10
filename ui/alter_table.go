@@ -249,6 +249,28 @@ func (a *AlterTableWindow) onActionSelected(action string) {
 	}
 }
 
+// SetCustomType устанавливает пользовательский тип для использования в ALTER TABLE
+func (a *AlterTableWindow) SetCustomType(typeName string) {
+	// Обновляем список типов данных, добавляя пользовательский тип
+	currentOptions := a.dataType.Options
+	customTypeOption := fmt.Sprintf("%s (пользовательский)", typeName)
+
+	// Проверяем, нет ли уже этого типа в списке
+	for _, option := range currentOptions {
+		if option == customTypeOption {
+			return // Уже есть
+		}
+	}
+
+	// Добавляем пользовательский тип в список
+	newOptions := append(currentOptions, customTypeOption)
+	a.dataType.Options = newOptions
+	a.dataType.Refresh()
+
+	// Устанавливаем выбранным пользовательский тип
+	a.dataType.SetSelected(customTypeOption)
+}
+
 func (a *AlterTableWindow) executeQuery(query string) {
 	// Сохраняем информацию о текущем состоянии ДО выполнения запроса
 	oldTableName := a.currentTable

@@ -58,3 +58,12 @@ type TextSearchConfig struct {
 	Column  string `json:"column"`
 	Pattern string `json:"pattern"`
 }
+
+type SubqueryConfig struct {
+	Type       string           `json:"type"` // ANY, ALL, EXISTS
+	MainTable  string           `json:"main_table"`
+	MainColumn string           `json:"main_column"`
+	Operator   string           `json:"operator"`
+	Subquery   string           `json:"subquery"`
+	Conditions []WhereCondition `json:"conditions"`
+}

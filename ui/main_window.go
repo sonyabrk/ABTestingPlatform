@@ -60,6 +60,8 @@ func (mw *MainWindow) CreateUI() {
 	joinBuilderBtn := widget.NewButton("Мастер JOIN", mw.showJoinBuilder)
 	textSearchBtn := widget.NewButton("Текстовый поиск", mw.showTextSearch)
 	stringFunctionsBtn := widget.NewButton("Функции работы со строками", mw.showStringFunctions)
+	customTypesBtn := widget.NewButton("Пользовательские типы", mw.showCustomTypes)
+	subqueryBtn := widget.NewButton("Подзапросы", mw.showSubqueryBuilder)
 
 	mw.titleLabel = widget.NewLabel("А/В Testing Platform")
 	mw.titleLabel.Alignment = fyne.TextAlignCenter
@@ -85,6 +87,8 @@ func (mw *MainWindow) CreateUI() {
 		joinBuilderBtn,
 		textSearchBtn,
 		stringFunctionsBtn,
+		customTypesBtn, // НОВАЯ КНОПКА
+		subqueryBtn,    // НОВАЯ КНОПКА
 	)
 
 	// Адаптивный контейнер - на маленьких экранах вертикально, на больших горизонтально
@@ -418,6 +422,10 @@ func (mw *MainWindow) createMenu() *fyne.MainMenu {
 			fyne.NewMenuItem("Текстовый поиск", mw.showTextSearch),
 			fyne.NewMenuItem("Работа со строками", mw.showStringFunctions),
 		),
+		fyne.NewMenu("Расширенные функции",
+			fyne.NewMenuItem("Пользовательские типы", mw.showCustomTypes),
+			fyne.NewMenuItem("Построитель подзапросов", mw.showSubqueryBuilder),
+		),
 		fyne.NewMenu("Справка",
 			fyne.NewMenuItem("Инструкция", mw.ShowInstructionDialog),
 		),
@@ -570,4 +578,15 @@ func (mw *MainWindow) ShowInstructionDialog() {
 	scroll.SetMinSize(fyne.NewSize(500, 300))
 
 	dialog.ShowCustom("Инструкция по внесению данных", "Понятно", scroll, mw.window)
+}
+func (mw *MainWindow) showCustomTypes() {
+	customTypesWin := NewCustomTypesWindow(mw.rep, mw.app)
+	customTypesWin.Show()
+}
+
+func (mw *MainWindow) showSubqueryBuilder() {
+	// Можно открыть общий построитель или показать сообщение
+	dialog.ShowInformation("Подзапросы",
+		"Функция подзапросов доступна в окне просмотра данных через кнопку 'Расширенный фильтр'",
+		mw.window)
 }

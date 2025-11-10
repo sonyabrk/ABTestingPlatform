@@ -22,7 +22,13 @@ type DataDisplayWindow struct {
 	tableContainer *fyne.Container
 	filterPanel    *fyne.Container
 	currentFilter  models.ExperimentFilter // Сохраняем текущий фильтр
-	tableName      string                  // НОВОЕ: храним имя таблицы
+	tableName      string                  // храним имя таблицы
+
+	// НОВЫЕ ПОЛЯ ДЛЯ ПОДЗАПРОСОВ
+	subqueryCondition *models.SubqueryCondition
+	subqueryBtn       *widget.Button
+	clearSubqueryBtn  *widget.Button
+	subqueryLabel     *widget.Label
 }
 
 // NewDataDisplayWindow создает новое окно отображения данных
@@ -56,10 +62,11 @@ func (d *DataDisplayWindow) buildUI() {
 	// создание контейнера для таблицы
 	d.tableContainer = container.NewStack()
 
-	// НОВОЕ: Выбор таблицы
+	// Выбор таблицы
 	tableSelect := widget.NewSelect([]string{}, func(selected string) {
 		if selected != "" {
 			d.tableName = selected
+			d.clearSubquery() // Очищаем подзапрос при смене таблицы
 			d.updateTable(d.currentFilter)
 			d.window.SetTitle("Данные таблицы: " + selected)
 		}
@@ -124,12 +131,20 @@ func (d *DataDisplayWindow) buildUI() {
 		d.refreshData()
 	})
 
-	// НОВОЕ: Кнопка обновления списка таблиц
+	// НОВЫЕ КНОПКИ ДЛЯ ПОДЗАПРОСОВ
+	d.subqueryBtn = widget.NewButton("Расширенный фильтр (подзапрос)", d.showSubqueryBuilder)
+	d.clearSubqueryBtn = widget.NewButton("Очистить подзапрос", d.clearSubquery)
+	d.clearSubqueryBtn.Disable() // Изначально отключена, пока нет подзапроса
+
+	d.subqueryLabel = widget.NewLabel("Подзапрос не применен")
+	d.subqueryLabel.Wrapping = fyne.TextWrapWord
+
+	// Кнопка обновления списка таблиц
 	refreshTablesBtn := widget.NewButton("Обновить список таблиц", func() {
 		d.loadTableList(tableSelect)
 	})
 
-	// Создаем панель фильтров
+	// Создаем панель фильтров с новыми элементами
 	d.filterPanel = container.NewVBox(
 		container.NewHBox(
 			widget.NewLabel("Таблица:"),
@@ -137,7 +152,7 @@ func (d *DataDisplayWindow) buildUI() {
 			refreshTablesBtn,
 		),
 		widget.NewSeparator(),
-		widget.NewLabel("Фильтры:"),
+		widget.NewLabel("Базовые фильтры:"),
 		container.NewHBox(
 			container.NewVBox(
 				widget.NewLabel("Алгоритм A:"),
@@ -165,6 +180,14 @@ func (d *DataDisplayWindow) buildUI() {
 			widget.NewButton("Очистить фильтры", clearFilters),
 			refreshBtn,
 		),
+		widget.NewSeparator(),
+		// НОВАЯ СЕКЦИЯ: ПОДЗАПРОСЫ
+		widget.NewLabelWithStyle("Расширенные фильтры (подзапросы)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		d.subqueryLabel,
+		container.NewHBox(
+			d.subqueryBtn,
+			d.clearSubqueryBtn,
+		),
 	)
 
 	// Добавляем отступы для лучшего вида
@@ -180,8 +203,8 @@ func (d *DataDisplayWindow) buildUI() {
 
 	// создание основного контейнера
 	content := container.NewBorder(
-		d.filterPanel,               // верхняя панель с фильтрами
-		container.NewHBox(closeBtn), // нижняя панель с кнопкой закрытия
+		container.NewScroll(d.filterPanel), // верхняя панель с фильтрами (теперь с прокруткой)
+		container.NewHBox(closeBtn),        // нижняя панель с кнопкой закрытия
 		nil, nil,
 		d.tableContainer, // центральная область с таблицей
 	)
@@ -189,7 +212,152 @@ func (d *DataDisplayWindow) buildUI() {
 	d.window.SetContent(content)
 }
 
-// НОВЫЙ метод: загрузка списка таблиц
+// НОВЫЕ МЕТОДЫ ДЛЯ ПОДЗАПРОСОВ
+
+// showSubqueryBuilder открывает окно построителя подзапросов
+func (d *DataDisplayWindow) showSubqueryBuilder() {
+	logger.Info("Открытие построителя подзапросов для таблицы: %s", d.tableName)
+
+	builder := NewSubqueryBuilder(d.mainWindow.rep, d.mainWindow.app, func(condition *models.SubqueryCondition) {
+		if condition != nil {
+			d.subqueryCondition = condition
+			d.applySubqueryFilter()
+			d.updateSubqueryUI()
+		}
+	})
+
+	// Устанавливаем основную таблицу, если она выбрана
+	if d.tableName != "" {
+		builder.SetMainTable(d.tableName)
+	}
+
+	builder.Show()
+}
+
+// applySubqueryFilter применяет подзапрос к данным
+func (d *DataDisplayWindow) applySubqueryFilter() {
+	if d.subqueryCondition == nil {
+		logger.Warn("Попытка применить пустой подзапрос")
+		return
+	}
+
+	logger.Info("Применение подзапроса типа: %s", d.subqueryCondition.Type)
+
+	// Показываем индикатор загрузки
+	d.subqueryLabel.SetText("Выполняется подзапрос...")
+	d.tableContainer.Objects = []fyne.CanvasObject{
+		widget.NewLabel("Выполнение подзапроса..."),
+	}
+	d.tableContainer.Refresh()
+
+	ctx := context.Background()
+	result, err := d.mainWindow.rep.ExecuteQuery(ctx, d.subqueryCondition.Subquery)
+	if err != nil {
+		errorMsg := fmt.Sprintf("Ошибка выполнения подзапроса: %v", err)
+		logger.Error(errorMsg)
+		dialog.ShowError(fmt.Errorf(errorMsg), d.window)
+		d.subqueryLabel.SetText("❌ Ошибка выполнения подзапроса")
+		return
+	}
+
+	if result.Error != "" {
+		errorMsg := fmt.Sprintf("Ошибка БД в подзапросе: %s", result.Error)
+		logger.Error(errorMsg)
+		dialog.ShowError(fmt.Errorf(errorMsg), d.window)
+		d.subqueryLabel.SetText("❌ Ошибка БД в подзапросе")
+		return
+	}
+
+	// Отображаем результаты
+	d.createDynamicTable(result)
+
+	// Обновляем информацию о подзапросе
+	d.updateSubqueryInfo(result)
+
+	logger.Info("Подзапрос успешно применен. Найдено строк: %d", len(result.Rows))
+}
+
+// updateSubqueryInfo обновляет информацию о примененном подзапросе
+func (d *DataDisplayWindow) updateSubqueryInfo(result *models.QueryResult) {
+	if d.subqueryCondition == nil {
+		return
+	}
+
+	info := fmt.Sprintf("✅ Применен подзапрос: %s\nНайдено строк: %d",
+		d.subqueryCondition.Type, len(result.Rows))
+
+	// Добавляем детали для разных типов подзапросов
+	switch d.subqueryCondition.Type {
+	case "EXISTS":
+		info += fmt.Sprintf("\nEXISTS (SELECT ... FROM %s)",
+			strings.Split(d.subqueryCondition.Subquery, "FROM ")[1])
+	case "ANY", "ALL":
+		info += fmt.Sprintf("\n%s %s %s (подзапрос)",
+			d.subqueryCondition.MainColumn,
+			d.subqueryCondition.Operator,
+			d.subqueryCondition.Type)
+	}
+
+	d.subqueryLabel.SetText(info)
+}
+
+// updateSubqueryUI обновляет интерфейс в зависимости от состояния подзапроса
+func (d *DataDisplayWindow) updateSubqueryUI() {
+	if d.subqueryCondition != nil {
+		d.clearSubqueryBtn.Enable()
+		d.subqueryBtn.SetText("Изменить подзапрос")
+	} else {
+		d.clearSubqueryBtn.Disable()
+		d.subqueryBtn.SetText("Расширенный фильтр (подзапрос)")
+		d.subqueryLabel.SetText("Подзапрос не применен")
+	}
+}
+
+// clearSubquery очищает примененный подзапрос
+func (d *DataDisplayWindow) clearSubquery() {
+	logger.Info("Очистка подзапроса")
+
+	d.subqueryCondition = nil
+	d.updateSubqueryUI()
+
+	// Возвращаемся к обычному отображению таблицы
+	d.updateTable(d.currentFilter)
+
+	dialog.ShowInformation("Подзапрос очищен",
+		"Примененный подзапрос был очищен. Отображаются все данные таблицы.",
+		d.window)
+}
+
+// RefreshData принудительно обновляет данные в окне
+func (d *DataDisplayWindow) RefreshData() {
+	logger.Info("Обновление данных в окне отображения. Текущая таблица: %s", d.tableName)
+
+	if d.subqueryCondition != nil {
+		// Если есть активный подзапрос, переприменяем его
+		d.applySubqueryFilter()
+	} else {
+		// Иначе обновляем обычные данные
+		d.refreshDataSilent()
+	}
+}
+
+// refreshDataSilent обновляет данные без показа диалога
+func (d *DataDisplayWindow) refreshDataSilent() {
+	if d.subqueryCondition != nil {
+		d.applySubqueryFilter()
+	} else {
+		d.updateTable(d.currentFilter)
+	}
+}
+
+// Обновляем существующий refreshData
+func (d *DataDisplayWindow) refreshData() {
+	d.refreshDataSilent()
+	dialog.ShowInformation("Обновлено", "Данные успешно обновлены", d.window)
+}
+
+// ОСТАВШИЕСЯ СУЩЕСТВУЮЩИЕ МЕТОДЫ (без изменений)
+
 func (d *DataDisplayWindow) loadTableList(tableSelect *widget.Select) {
 	tables, err := d.mainWindow.rep.GetTableNames(context.Background())
 	if err != nil {
@@ -223,78 +391,15 @@ func (d *DataDisplayWindow) loadTableList(tableSelect *widget.Select) {
 	logger.Info("Список таблиц обновлен. Текущая таблица: %s", d.tableName)
 }
 
-// RefreshData принудительно обновляет данные в окне
-func (d *DataDisplayWindow) RefreshData() {
-	logger.Info("Обновление данных в окне отображения. Текущая таблица: %s", d.tableName)
-	d.refreshDataSilent()
-}
-
-// refreshDataSilent обновляет данные без показа диалога
-func (d *DataDisplayWindow) refreshDataSilent() {
-	d.updateTable(d.currentFilter) // Используем текущий фильтр
-}
-
-// Обновим существующий refreshData
-func (d *DataDisplayWindow) refreshData() {
-	d.refreshDataSilent()
-	dialog.ShowInformation("Обновлено", "Данные успешно обновлены", d.window)
-}
-
-// convertValueToString конвертирует любое значение в строку для отображения
-func convertValueToString(value interface{}) string {
-	if value == nil {
-		return ""
-	}
-
-	// Обработка pgtype.Numeric
-	if numeric, ok := value.(pgtype.Numeric); ok {
-		if !numeric.Valid {
-			return ""
-		}
-		// Преобразуем Numeric в float64 и форматируем
-		floatVal, err := numeric.Float64Value()
-		if err != nil {
-			return fmt.Sprintf("%v", numeric)
-		}
-		if !floatVal.Valid {
-			return ""
-		}
-		return fmt.Sprintf("%.2f", floatVal.Float64)
-	}
-
-	switch v := value.(type) {
-	case string:
-		return v
-	case int, int32, int64:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%.2f", v)
-	case bool:
-		if v {
-			return "Да"
-		}
-		return "Нет"
-	case []string:
-		return strings.Join(v, ", ")
-	case []byte:
-		return string(v)
-	case time.Time:
-		return v.Format("2006-01-02 15:04:05")
-	default:
-		// Для других типов пробуем преобразовать в строку
-		str := fmt.Sprintf("%v", v)
-		// Пытаемся распарсить как число, если похоже на числовое значение
-		if strings.Contains(str, "Numeric") || strings.Contains(str, "pgtype") {
-			// Это внутреннее представление pgtype, пропускаем
-			return ""
-		}
-		return str
-	}
-}
-
 func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
 	// Сохраняем текущий фильтр
 	d.currentFilter = filter
+
+	// Если есть активный подзапрос, используем его вместо обычного запроса
+	if d.subqueryCondition != nil {
+		d.applySubqueryFilter()
+		return
+	}
 
 	ctx := context.Background()
 
@@ -392,6 +497,58 @@ func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
 	}
 
 	d.createDynamicTable(result)
+}
+
+// convertValueToString конвертирует любое значение в строку для отображения
+func convertValueToString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+
+	// Обработка pgtype.Numeric
+	if numeric, ok := value.(pgtype.Numeric); ok {
+		if !numeric.Valid {
+			return ""
+		}
+		// Преобразуем Numeric в float64 и форматируем
+		floatVal, err := numeric.Float64Value()
+		if err != nil {
+			return fmt.Sprintf("%v", numeric)
+		}
+		if !floatVal.Valid {
+			return ""
+		}
+		return fmt.Sprintf("%.2f", floatVal.Float64)
+	}
+
+	switch v := value.(type) {
+	case string:
+		return v
+	case int, int32, int64:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%.2f", v)
+	case bool:
+		if v {
+			return "Да"
+		}
+		return "Нет"
+	case []string:
+		return strings.Join(v, ", ")
+	case []byte:
+		return string(v)
+	case time.Time:
+		return v.Format("2006-01-02 15:04:05")
+	default:
+		// Для других типов пробуем преобразовать в строку
+		str := fmt.Sprintf("%v", v)
+		// Пытаемся распарсить как число, если похоже на числовое значение
+		if strings.Contains(str, "Numeric") || strings.Contains(str, "pgtype") {
+			// Это внутреннее представление pgtype, пропускаем
+			return ""
+		}
+		return str
+	}
 }
 
 // executeQueryWithParams выполняет параметризованный запрос
