@@ -201,12 +201,19 @@ func (d *DataDisplayWindow) buildUI() {
 	// первоначальная загрузка данных
 	d.updateTable(models.ExperimentFilter{})
 
-	// создание основного контейнера
+	// ИСПРАВЛЕНИЕ: Используем VSplit для разделения панели фильтров и таблицы
+	split := container.NewVSplit(
+		container.NewScroll(d.filterPanel), // Верхняя часть - панель фильтров с прокруткой
+		d.tableContainer,                   // Нижняя часть - таблица
+	)
+	split.SetOffset(0.3) // Устанавливаем начальное разделение (30% для фильтров, 70% для таблицы)
+
+	// создание основного контейнера с исправленным макетом
 	content := container.NewBorder(
-		container.NewScroll(d.filterPanel), // верхняя панель с фильтрами (теперь с прокруткой)
-		container.NewHBox(closeBtn),        // нижняя панель с кнопкой закрытия
+		nil,                         // верхняя панель (теперь в split)
+		container.NewHBox(closeBtn), // нижняя панель с кнопкой закрытия
 		nil, nil,
-		d.tableContainer, // центральная область с таблицей
+		split, // центральная область с разделителем
 	)
 
 	d.window.SetContent(content)
@@ -254,16 +261,16 @@ func (d *DataDisplayWindow) applySubqueryFilter() {
 	result, err := d.mainWindow.rep.ExecuteQuery(ctx, d.subqueryCondition.Subquery)
 	if err != nil {
 		errorMsg := fmt.Sprintf("Ошибка выполнения подзапроса: %v", err)
-		logger.Error(errorMsg)
-		dialog.ShowError(fmt.Errorf(errorMsg), d.window)
+		logger.Error("%s", errorMsg)
+		dialog.ShowError(fmt.Errorf("%s", errorMsg), d.window)
 		d.subqueryLabel.SetText("❌ Ошибка выполнения подзапроса")
 		return
 	}
 
 	if result.Error != "" {
 		errorMsg := fmt.Sprintf("Ошибка БД в подзапросе: %s", result.Error)
-		logger.Error(errorMsg)
-		dialog.ShowError(fmt.Errorf(errorMsg), d.window)
+		logger.Error("%s", errorMsg)
+		dialog.ShowError(fmt.Errorf("%s", errorMsg), d.window)
 		d.subqueryLabel.SetText("❌ Ошибка БД в подзапросе")
 		return
 	}
