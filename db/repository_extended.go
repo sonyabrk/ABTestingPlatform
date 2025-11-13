@@ -81,27 +81,6 @@ func (r *Repository) GetTableNames(ctx context.Context) ([]string, error) {
 	return tables, nil
 }
 
-// // GetTableNames возвращает список всех таблиц в базе данных
-// func (r *Repository) GetTableNames(ctx context.Context) ([]string, error) {
-// 	query := `
-//         SELECT table_name
-//         FROM information_schema.tables
-//         WHERE table_schema = 'public'
-//         ORDER BY table_name
-//     `
-
-// 	result, err := r.ExecuteQuery(ctx, query)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	var tables []string
-// 	for _, row := range result.Rows {
-// 		if tableName, ok := row["table_name"].(string); ok {
-// 			tables = append(tables, tableName)
-// 		}
-// 	}
-
 // 	return tables, nil
 // }
 
@@ -278,16 +257,16 @@ func (r *Repository) GetTableColumns(ctx context.Context, tableName string) ([]m
 func (r *Repository) ExecuteQuery(ctx context.Context, query string) (*models.QueryResult, error) {
 	logger.Info("Выполнение запроса: %s", query)
 
-	// Начинаем транзакцию для безопасного выполнения
-	tx, err := r.pool.Begin(ctx)
+	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка начала транзакции: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	rows, err := tx.Query(ctx, query)
-	if err != nil {
+		logger.Error("Ошибка выполнения запроса: %v", err)
 		return &models.QueryResult{Error: err.Error()}, nil
+	}
+
+	// ВАЖНО: Проверяем что rows не nil
+	if rows == nil {
+		logger.Error("Запрос вернул nil rows")
+		return &models.QueryResult{Error: "Запрос не вернул результатов"}, nil
 	}
 	defer rows.Close()
 
@@ -303,6 +282,7 @@ func (r *Repository) ExecuteQuery(ctx context.Context, query string) (*models.Qu
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
+			logger.Error("Ошибка чтения значений: %v", err)
 			return &models.QueryResult{Error: err.Error()}, nil
 		}
 
@@ -313,11 +293,9 @@ func (r *Repository) ExecuteQuery(ctx context.Context, query string) (*models.Qu
 		resultRows = append(resultRows, row)
 	}
 
-	// Если это SELECT, коммитим
-	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "SELECT") {
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("ошибка коммита транзакции: %w", err)
-		}
+	if err := rows.Err(); err != nil {
+		logger.Error("Ошибка в rows: %v", err)
+		return &models.QueryResult{Error: err.Error()}, nil
 	}
 
 	return &models.QueryResult{

@@ -1,4 +1,4 @@
-// subquery_builder.go (полная исправленная версия)
+// subquery_builder.go (исправленная версия)
 package ui
 
 import (
@@ -63,7 +63,6 @@ func (s *SubqueryBuilder) buildUI() {
 	s.mainColumnSelect.PlaceHolder = "Столбец основной таблицы"
 
 	s.typeSelect = widget.NewSelect([]string{"ANY", "ALL", "EXISTS"}, s.onTypeSelected)
-	s.typeSelect.SetSelected("ANY")
 	s.typeSelect.PlaceHolder = "Тип подзапроса"
 
 	s.operatorSelect = widget.NewSelect([]string{"=", "!=", ">", "<", ">=", "<="}, nil)
@@ -127,9 +126,17 @@ func (s *SubqueryBuilder) buildUI() {
 
 	s.window.SetContent(split)
 	s.window.Resize(fyne.NewSize(900, 600))
+
+	// Устанавливаем значение ПОСЛЕ построения UI
+	s.typeSelect.SetSelected("ANY")
 }
 
 func (s *SubqueryBuilder) onTypeSelected(selected string) {
+	// Проверяем, что элементы инициализированы
+	if s.operatorSelect == nil || s.subqueryColumn == nil {
+		return
+	}
+
 	// Показываем/скрываем элементы в зависимости от типа
 	if selected == "EXISTS" {
 		s.operatorSelect.Hide()
@@ -284,6 +291,12 @@ func (s *SubqueryBuilder) buildWhereClause() string {
 }
 
 func (s *SubqueryBuilder) previewSQL() {
+	// Проверяем, что все необходимые элементы инициализированы
+	if s.mainTableSelect == nil || s.mainColumnSelect == nil ||
+		s.typeSelect == nil || s.subqueryTable == nil {
+		return
+	}
+
 	if s.mainTableSelect.Selected == "" || s.mainColumnSelect.Selected == "" ||
 		s.typeSelect.Selected == "" || s.subqueryTable.Selected == "" {
 		return
@@ -295,6 +308,7 @@ func (s *SubqueryBuilder) previewSQL() {
 
 	switch subqueryType {
 	case "EXISTS":
+		// ДОБАВЛЯЕМ КОРРЕКТНЫЙ EXISTS ЗАПРОС
 		sql = fmt.Sprintf("SELECT * FROM %s WHERE EXISTS (SELECT 1 FROM %s WHERE %s)",
 			s.mainTableSelect.Selected, s.subqueryTable.Selected, whereClause)
 	case "ANY", "ALL":

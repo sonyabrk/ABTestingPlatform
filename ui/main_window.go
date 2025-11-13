@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -189,7 +190,7 @@ func (mw *MainWindow) RefreshAllWindows() {
 
 // Добавьте метод для показа ошибок
 func (mw *MainWindow) showErrorMessage(message string) {
-	dialog.ShowError(fmt.Errorf(message), mw.window)
+	dialog.ShowError(errors.New(message), mw.window)
 }
 
 func (mw *MainWindow) NotifyAllDataWindows() {

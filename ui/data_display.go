@@ -267,6 +267,15 @@ func (d *DataDisplayWindow) applySubqueryFilter() {
 		return
 	}
 
+	// ДОБАВЛЯЕМ ПРОВЕРКУ НА NIL РЕЗУЛЬТАТ
+	if result == nil {
+		errorMsg := "Запрос не вернул результатов (nil result)"
+		logger.Error("%s", errorMsg)
+		dialog.ShowError(fmt.Errorf("%s", errorMsg), d.window)
+		d.subqueryLabel.SetText("❌ Запрос не вернул результатов")
+		return
+	}
+
 	if result.Error != "" {
 		errorMsg := fmt.Sprintf("Ошибка БД в подзапросе: %s", result.Error)
 		logger.Error("%s", errorMsg)
