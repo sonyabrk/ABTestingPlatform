@@ -54,6 +54,9 @@ func (mw *MainWindow) CreateUI() {
 	addDataBtn := widget.NewButton("Внести данные", mw.showDataInputDialog)
 	showDataBtn := widget.NewButton("Показать данные", mw.showDataDisplayWindow)
 	showSummaryBtn := widget.NewButton("Сводные данные", mw.showSummaryWindow)
+	// Добавьте новую кнопку для поиска с регулярными выражениями
+	regexSearchBtn := widget.NewButton("Поиск с регулярными выражениями", mw.showSimilarToSearch)
+	caseBuilderBtn := widget.NewButton("Конструктор CASE и NULL", mw.showCaseBuilder)
 
 	// Новые кнопки для быстрого доступа к функциям БД
 	alterTableBtn := widget.NewButton("ALTER TABLE", mw.showAlterTable)
@@ -87,9 +90,11 @@ func (mw *MainWindow) CreateUI() {
 		advancedQueryBtn,
 		joinBuilderBtn,
 		textSearchBtn,
+		regexSearchBtn,
 		stringFunctionsBtn,
-		customTypesBtn, // НОВАЯ КНОПКА
-		subqueryBtn,    // НОВАЯ КНОПКА
+		customTypesBtn,
+		subqueryBtn,
+		caseBuilderBtn,
 	)
 
 	// Адаптивный контейнер - на маленьких экранах вертикально, на больших горизонтально
@@ -124,6 +129,17 @@ func (mw *MainWindow) CreateUI() {
 			mw.updateLayout()
 		}
 	})
+}
+
+func (mw *MainWindow) showCaseBuilder() {
+	caseWin := NewCaseBuilderWindow(mw.rep, mw.window)
+	caseWin.Show()
+}
+
+// Добавьте новый метод для показа окна поиска с регулярными выражениями:
+func (mw *MainWindow) showSimilarToSearch() {
+	searchWin := NewSimilarToSearchWindow(mw.rep, mw.window)
+	searchWin.Show()
 }
 
 // Добавляем методы для управления окнами данных
@@ -429,6 +445,9 @@ func (mw *MainWindow) createMenu() *fyne.MainMenu {
 		),
 		fyne.NewMenu("Справка",
 			fyne.NewMenuItem("Инструкция", mw.ShowInstructionDialog),
+		),
+		fyne.NewMenu("Условные выражения",
+			fyne.NewMenuItem("Конструктор CASE и NULL", mw.showCaseBuilder),
 		),
 	)
 }

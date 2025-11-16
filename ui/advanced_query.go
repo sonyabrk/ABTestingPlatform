@@ -30,6 +30,12 @@ type AdvancedQueryWindow struct {
 	limitSlider      *widget.Slider  // Слайдер для LIMIT
 	limitLabel       *widget.Label   // Отображение значения LIMIT
 
+	// НОВЫЕ ЭЛЕМЕНТЫ ДЛЯ АГРЕГАЦИИ
+	aggregationSelect    *widget.Select      // Выбор агрегатной функции
+	aggregationColumn    *widget.Select      // Столбец для агрегации
+	aggregationContainer *fyne.Container     // Контейнер для отображения агрегаций
+	aggregateFunctions   []AggregateFunction // Список агрегатных функций
+
 	// Результаты
 	resultTable *widget.Table
 	resultLabel *widget.Label
@@ -54,14 +60,22 @@ type OrderByCondition struct {
 	Direction string
 }
 
+// НОВАЯ СТРУКТУРА: Агрегатная функция
+type AggregateFunction struct {
+	Function string
+	Column   string
+	Alias    string
+}
+
 func NewAdvancedQueryWindow(repo *db.Repository, mainWindow fyne.Window) *AdvancedQueryWindow {
 	a := &AdvancedQueryWindow{
-		repository:        repo,
-		mainWindow:        mainWindow,
-		window:            fyne.CurrentApp().NewWindow("Расширенный SELECT"),
-		whereConditions:   []WhereCondition{},
-		orderByConditions: []OrderByCondition{},
-		havingConditions:  []WhereCondition{},
+		repository:         repo,
+		mainWindow:         mainWindow,
+		window:             fyne.CurrentApp().NewWindow("Расширенный SELECT"),
+		whereConditions:    []WhereCondition{},
+		orderByConditions:  []OrderByCondition{},
+		havingConditions:   []WhereCondition{},
+		aggregateFunctions: []AggregateFunction{},
 	}
 
 	a.buildUI()
@@ -84,6 +98,17 @@ func (a *AdvancedQueryWindow) buildUI() {
 	// GROUP BY элементы
 	a.groupByList = widget.NewSelect([]string{}, nil)
 	a.groupByList.PlaceHolder = "Выберите столбец для группировки"
+
+	// НОВЫЕ ЭЛЕМЕНТЫ ДЛЯ АГРЕГАЦИИ
+	a.aggregationSelect = widget.NewSelect([]string{
+		"", "COUNT(*)", "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT(DISTINCT)",
+	}, nil)
+	a.aggregationSelect.PlaceHolder = "Агрегатная функция"
+
+	a.aggregationColumn = widget.NewSelect([]string{}, nil)
+	a.aggregationColumn.PlaceHolder = "Столбец для агрегации"
+
+	a.aggregationContainer = container.NewVBox()
 
 	// LIMIT элементы
 	a.limitSlider = widget.NewSlider(1, 10000) // Увеличили максимальный лимит
@@ -118,6 +143,11 @@ func (a *AdvancedQueryWindow) buildUI() {
 	addWhereBtn := widget.NewButton("Добавить условие WHERE", a.addWhereCondition)
 	addOrderByBtn := widget.NewButton("Добавить сортировку ORDER BY", a.addOrderByCondition)
 	addHavingBtn := widget.NewButton("Добавить условие HAVING", a.addHavingCondition)
+
+	// НОВЫЕ КНОПКИ ДЛЯ АГРЕГАЦИИ
+	addAggregationBtn := widget.NewButton("Добавить агрегатную функцию", a.addAggregation)
+	clearAggregationsBtn := widget.NewButton("Очистить агрегации", a.clearAggregations)
+
 	executeBtn := widget.NewButton("Выполнить запрос", a.executeQuery)
 	clearBtn := widget.NewButton("Очистить всё", a.clearForm)
 	showSQLBtn := widget.NewButton("Показать SQL", a.previewSQL)
@@ -138,6 +168,10 @@ func (a *AdvancedQueryWindow) buildUI() {
 	havingLabel := widget.NewLabel("Условия HAVING:")
 	havingLabel.TextStyle = fyne.TextStyle{Bold: true}
 
+	// НОВАЯ МЕТКА ДЛЯ АГРЕГАЦИЙ
+	aggregationLabel := widget.NewLabel("Агрегатные функции:")
+	aggregationLabel.TextStyle = fyne.TextStyle{Bold: true}
+
 	limitLabelTitle := widget.NewLabel("Ограничение результатов:")
 	limitLabelTitle.TextStyle = fyne.TextStyle{Bold: true}
 
@@ -148,14 +182,6 @@ func (a *AdvancedQueryWindow) buildUI() {
 		columnScroll, // Используем увеличенный скролл-контейнер
 	)
 
-	// // Компоновка
-	// leftPanel := container.NewVBox(
-	// 	widget.NewLabel("Таблица:"),
-	// 	a.tableSelect,
-	// 	widget.NewLabel("Столбцы:"),
-	// 	container.NewScroll(a.columnList),
-	// )
-
 	conditionsPanel := container.NewVBox(
 		whereLabel,
 		a.whereContainer,
@@ -164,6 +190,21 @@ func (a *AdvancedQueryWindow) buildUI() {
 		orderByLabel,
 		a.orderByContainer,
 		addOrderByBtn,
+		widget.NewSeparator(),
+		// НОВАЯ СЕКЦИЯ: АГРЕГАЦИЯ
+		aggregationLabel,
+		container.NewHBox(
+			container.NewVBox(
+				widget.NewLabel("Функция:"),
+				a.aggregationSelect,
+			),
+			container.NewVBox(
+				widget.NewLabel("Столбец:"),
+				a.aggregationColumn,
+			),
+		),
+		container.NewHBox(addAggregationBtn, clearAggregationsBtn),
+		a.aggregationContainer,
 		widget.NewSeparator(),
 		groupByLabel,
 		a.groupByList,
@@ -179,10 +220,14 @@ func (a *AdvancedQueryWindow) buildUI() {
 		hintLabel,
 	)
 
+	// ОБЕРТЫВАЕМ ПАНЕЛЬ УСЛОВИЙ В СКРОЛЛ
+	conditionsScroll := container.NewScroll(conditionsPanel)
+	conditionsScroll.SetMinSize(fyne.NewSize(500, 500)) // Устанавливаем минимальный размер
+
 	buttonsContainer := container.NewHBox(executeBtn, showSQLBtn, clearBtn)
 
 	rightPanel := container.NewVBox(
-		conditionsPanel,
+		conditionsScroll, // Используем скролл вместо conditionsPanel
 		buttonsContainer,
 	)
 
@@ -192,16 +237,156 @@ func (a *AdvancedQueryWindow) buildUI() {
 	resultScroll := container.NewScroll(a.resultTable)
 	resultScroll.SetMinSize(fyne.NewSize(800, 500))
 
-	content := container.NewBorder(
+	// Используем VSplit для разделения панели управления и результатов
+	mainSplit := container.NewVSplit(
 		controls,
-		container.NewVBox(a.resultLabel, widget.NewLabel("SQL:"), a.sqlPreview),
-		nil, nil,
-		resultScroll,
+		container.NewBorder(
+			nil,
+			container.NewVBox(a.resultLabel, widget.NewLabel("SQL:"), a.sqlPreview),
+			nil, nil,
+			resultScroll,
+		),
 	)
+	mainSplit.SetOffset(0.4) // 40% для панели управления, 60% для результатов
 
-	a.window.SetContent(content)
+	a.window.SetContent(container.NewPadded(mainSplit))
 	a.window.Resize(fyne.NewSize(1200, 800))
 }
+
+// НОВЫЕ МЕТОДЫ ДЛЯ АГРЕГАЦИИ
+
+// addAggregation добавляет новую агрегатную функцию
+func (a *AdvancedQueryWindow) addAggregation() {
+	function := a.aggregationSelect.Selected
+	column := a.aggregationColumn.Selected
+
+	if function == "" {
+		dialog.ShowInformation("Не выбрана функция", "Пожалуйста, выберите агрегатную функцию", a.window)
+		return
+	}
+
+	if function != "COUNT(*)" && function != "COUNT(DISTINCT)" && column == "" {
+		dialog.ShowInformation("Не выбран столбец", "Пожалуйста, выберите столбец для агрегации", a.window)
+		return
+	}
+
+	// Создаем агрегатную функцию
+	aggFunc := AggregateFunction{
+		Function: function,
+		Column:   column,
+		Alias:    fmt.Sprintf("%s_%s", strings.ToLower(function), column),
+	}
+
+	// Для COUNT(*) и COUNT(DISTINCT) не используем имя столбца в алиасе
+	if function == "COUNT(*)" {
+		aggFunc.Alias = "total_count"
+		aggFunc.Column = "*"
+	} else if function == "COUNT(DISTINCT)" {
+		aggFunc.Alias = fmt.Sprintf("distinct_count_%s", column)
+	}
+
+	a.aggregateFunctions = append(a.aggregateFunctions, aggFunc)
+	a.updateAggregationDisplay()
+}
+
+// updateAggregationDisplay обновляет отображение агрегатных функций
+func (a *AdvancedQueryWindow) updateAggregationDisplay() {
+	a.aggregationContainer.Objects = nil
+
+	for i, agg := range a.aggregateFunctions {
+		// Создаем отображение для каждой агрегатной функции
+		var displayText string
+		if agg.Function == "COUNT(*)" {
+			displayText = "COUNT(*)"
+		} else if agg.Function == "COUNT(DISTINCT)" {
+			displayText = fmt.Sprintf("COUNT(DISTINCT %s)", agg.Column)
+		} else {
+			displayText = fmt.Sprintf("%s(%s)", agg.Function, agg.Column)
+		}
+
+		if agg.Alias != "" {
+			displayText += fmt.Sprintf(" AS %s", agg.Alias)
+		}
+
+		aggLabel := widget.NewLabel(displayText)
+		deleteBtn := widget.NewButton("✕", func(index int) func() {
+			return func() {
+				// Удаляем агрегатную функцию по индексу
+				a.aggregateFunctions = append(a.aggregateFunctions[:index], a.aggregateFunctions[index+1:]...)
+				a.updateAggregationDisplay()
+			}
+		}(i))
+
+		row := container.NewHBox(aggLabel, deleteBtn)
+		a.aggregationContainer.Add(row)
+	}
+
+	a.aggregationContainer.Refresh()
+}
+
+// clearAggregations очищает все агрегатные функции
+func (a *AdvancedQueryWindow) clearAggregations() {
+	a.aggregateFunctions = []AggregateFunction{}
+	a.aggregationContainer.Objects = nil
+	a.aggregationContainer.Refresh()
+}
+
+// buildAggregationSelect строит часть SELECT для агрегатных функций
+func (a *AdvancedQueryWindow) buildAggregationSelect() string {
+	if len(a.aggregateFunctions) == 0 {
+		return ""
+	}
+
+	var aggParts []string
+	for _, agg := range a.aggregateFunctions {
+		var aggPart string
+
+		switch agg.Function {
+		case "COUNT(*)":
+			aggPart = "COUNT(*)"
+		case "COUNT(DISTINCT)":
+			aggPart = fmt.Sprintf("COUNT(DISTINCT %s)", agg.Column)
+		default:
+			aggPart = fmt.Sprintf("%s(%s)", agg.Function, agg.Column)
+		}
+
+		if agg.Alias != "" {
+			aggPart += fmt.Sprintf(" AS %s", agg.Alias)
+		}
+
+		aggParts = append(aggParts, aggPart)
+	}
+
+	return strings.Join(aggParts, ", ")
+}
+
+// buildGroupByQuery строит часть GROUP BY запроса
+func (a *AdvancedQueryWindow) buildGroupByQuery() string {
+	if a.groupByList.Selected == "" {
+		return ""
+	}
+	return " GROUP BY " + a.groupByList.Selected
+}
+
+// buildHavingQuery строит часть HAVING запроса
+func (a *AdvancedQueryWindow) buildHavingQuery() (string, error) {
+	if len(a.havingConditions) == 0 {
+		return "", nil
+	}
+
+	havingClause, err := a.buildConditions(a.havingConditions)
+	if err != nil {
+		return "", fmt.Errorf("ошибка в условиях HAVING: %v", err)
+	}
+
+	if havingClause != "" {
+		return " HAVING " + havingClause, nil
+	}
+
+	return "", nil
+}
+
+// Существующие методы (без изменений в логике, только добавлены вызовы новых методов)
 
 // Валидация значения для условия WHERE/HAVING
 func (a *AdvancedQueryWindow) validateConditionValue(operator, value string) error {
@@ -262,7 +447,7 @@ func (a *AdvancedQueryWindow) validateQuery() error {
 		if condition.Operator == "" {
 			return fmt.Errorf("в условии WHERE №%d не выбран оператор", i+1)
 		}
-		// Для операторов, требующих значения
+		// Для операторов, требующих значений
 		if condition.Operator != "IS NULL" && condition.Operator != "IS NOT NULL" {
 			if strings.TrimSpace(condition.Value) == "" {
 				return fmt.Errorf("в условии WHERE №%d не указано значение", i+1)
@@ -281,7 +466,7 @@ func (a *AdvancedQueryWindow) validateQuery() error {
 		if condition.Operator == "" {
 			return fmt.Errorf("в условии HAVING №%d не выбран оператор", i+1)
 		}
-		// Для операторов, требующих значения
+		// Для операторов, требующих значений
 		if condition.Operator != "IS NULL" && condition.Operator != "IS NOT NULL" {
 			if strings.TrimSpace(condition.Value) == "" {
 				return fmt.Errorf("в условии HAVING №%d не указано значение", i+1)
@@ -312,6 +497,14 @@ func (a *AdvancedQueryWindow) validateQuery() error {
 		if !found {
 			return fmt.Errorf("выбранный столбец для GROUP BY не существует в таблице")
 		}
+	}
+
+	// Проверка агрегатных функций
+	if len(a.aggregateFunctions) > 0 && a.groupByList.Selected == "" {
+		// Предупреждение: агрегация без GROUP BY может вернуть только одну строку
+		// Это допустимо, но предупредим пользователя
+		dialog.ShowInformation("Агрегация без группировки",
+			"Вы используете агрегатные функции без GROUP BY. Будет возвращена только одна строка с агрегированными значениями.", a.window)
 	}
 
 	return nil
@@ -560,6 +753,10 @@ func (a *AdvancedQueryWindow) onTableSelected(table string) {
 	a.groupByList.Options = columnNames
 	a.groupByList.Refresh()
 
+	// ОБНОВЛЯЕМ СПИСОК СТОЛБЦОВ ДЛЯ АГРЕГАЦИИ
+	a.aggregationColumn.Options = columnNames
+	a.aggregationColumn.Refresh()
+
 	// Обновляем существующие условия
 	a.updateExistingConditions()
 }
@@ -605,6 +802,7 @@ func (a *AdvancedQueryWindow) updateExistingConditions() {
 	}
 }
 
+// ОБНОВЛЕННЫЙ МЕТОД buildQuery - добавлена поддержка агрегаций
 func (a *AdvancedQueryWindow) buildQuery() (string, error) {
 	// Валидация перед построением запроса
 	if err := a.validateQuery(); err != nil {
@@ -615,7 +813,12 @@ func (a *AdvancedQueryWindow) buildQuery() (string, error) {
 
 	// SELECT часть
 	var selectedColumns string
-	if len(a.columnList.Selected) == 0 {
+	aggSelect := a.buildAggregationSelect()
+
+	if aggSelect != "" {
+		// Если есть агрегатные функции, используем их
+		selectedColumns = aggSelect
+	} else if len(a.columnList.Selected) == 0 {
 		selectedColumns = "*"
 	} else {
 		selectedColumns = strings.Join(a.columnList.Selected, ", ")
@@ -633,17 +836,18 @@ func (a *AdvancedQueryWindow) buildQuery() (string, error) {
 	}
 
 	// GROUP BY
-	if a.groupByList.Selected != "" {
-		query += " GROUP BY " + a.groupByList.Selected
+	groupByClause := a.buildGroupByQuery()
+	if groupByClause != "" {
+		query += groupByClause
 	}
 
 	// HAVING условия
-	havingClause, err := a.buildConditions(a.havingConditions)
+	havingClause, err := a.buildHavingQuery()
 	if err != nil {
 		return "", fmt.Errorf("ошибка в условиях HAVING: %v", err)
 	}
 	if havingClause != "" {
-		query += " HAVING " + havingClause
+		query += havingClause
 	}
 
 	// ORDER BY условия
@@ -700,7 +904,7 @@ func (a *AdvancedQueryWindow) buildConditions(conditions []WhereCondition) (stri
 			}
 			valueStr = "(" + strings.Join(escapedValues, ", ") + ")"
 		default:
-			// Для строковых значений добавляем кавычки
+			// Для строковых значения добавляем кавычки
 			if _, err := strconv.Atoi(cond.Value); err != nil {
 				// Если не число, обрамляем кавычками и экранируем
 				escapedValue := strings.ReplaceAll(cond.Value, "'", "''")
@@ -886,6 +1090,7 @@ func (a *AdvancedQueryWindow) previewSQL() {
 	a.sqlPreview.SetText(query)
 }
 
+// ОБНОВЛЕННЫЙ МЕТОД clearForm - добавлена очистка агрегаций
 func (a *AdvancedQueryWindow) clearForm() {
 	a.tableSelect.SetSelected("")
 	a.columnList.Selected = []string{}
@@ -899,6 +1104,12 @@ func (a *AdvancedQueryWindow) clearForm() {
 	a.resultLabel.SetText("Результаты появятся здесь")
 	a.resultTable.Length = func() (int, int) { return 0, 0 }
 	a.resultTable.Refresh()
+
+	// ОЧИСТКА АГРЕГАЦИЙ
+	a.aggregateFunctions = []AggregateFunction{}
+	a.aggregationContainer.Objects = nil
+	a.aggregationSelect.SetSelected("")
+	a.aggregationColumn.SetSelected("")
 
 	a.whereConditions = []WhereCondition{}
 	a.orderByConditions = []OrderByCondition{}

@@ -31,6 +31,138 @@ type DataDisplayWindow struct {
 	subqueryLabel     *widget.Label
 }
 
+// convertValueToString конвертирует любое значение в строку для отображения
+func convertValueToString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+
+	// Обработка pgtype.Numeric
+	if numeric, ok := value.(pgtype.Numeric); ok {
+		if !numeric.Valid {
+			return ""
+		}
+		// Преобразуем Numeric в float64 и форматируем
+		floatVal, err := numeric.Float64Value()
+		if err != nil {
+			return fmt.Sprintf("%v", numeric)
+		}
+		if !floatVal.Valid {
+			return ""
+		}
+		return fmt.Sprintf("%.2f", floatVal.Float64)
+	}
+
+	// Обработка составных типов через строковое представление
+	switch v := value.(type) {
+	case string:
+		// Проверяем, не является ли строка составным типом
+		if looksLikeCompositeType(v) {
+			return formatCompositeString(v)
+		}
+		return v
+	case int, int32, int64:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%.2f", v)
+	case bool:
+		if v {
+			return "Да"
+		}
+		return "Нет"
+	case []string:
+		return strings.Join(v, ", ")
+	case []byte:
+		str := string(v)
+		// Пытаемся определить, является ли это составным типом
+		if looksLikeCompositeType(str) {
+			return formatCompositeString(str)
+		}
+		return str
+	case time.Time:
+		return v.Format("2006-01-02 15:04:05")
+	default:
+		// Для других типов пробуем преобразовать в строку
+		str := fmt.Sprintf("%v", v)
+
+		// Пытаемся распознать составные типы в строковом представлении
+		if looksLikeCompositeType(str) {
+			return formatCompositeString(str)
+		}
+
+		// Пропускаем внутренние представления pgtype
+		if strings.Contains(str, "Numeric") || strings.Contains(str, "pgtype") {
+			return ""
+		}
+		return str
+	}
+}
+
+// looksLikeCompositeType проверяет, похожа ли строка на составной тип
+func looksLikeCompositeType(str string) bool {
+	// Составные типы обычно выглядят как (value1,value2,value3)
+	// или имеют формат с кавычками
+	return (strings.HasPrefix(str, "(") && strings.HasSuffix(str, ")") &&
+		strings.Contains(str, ",")) ||
+		(strings.Contains(str, "\"") && strings.Count(str, "\"") >= 4)
+}
+
+// formatCompositeString форматирует строковое представление составного типа
+func formatCompositeString(str string) string {
+	// Убираем внешние скобки если они есть
+	trimmed := strings.TrimSpace(str)
+	if strings.HasPrefix(trimmed, "(") && strings.HasSuffix(trimmed, ")") {
+		trimmed = strings.TrimPrefix(strings.TrimSuffix(trimmed, ")"), "(")
+	}
+
+	// Пытаемся разобрать поля, учитывая кавычки
+	fields := parseCompositeFields(trimmed)
+
+	// Форматируем каждое поле
+	var formattedFields []string
+	for i, field := range fields {
+		field = strings.TrimSpace(field)
+		// Убираем кавычки если они есть
+		field = strings.Trim(field, "\"")
+		formattedFields = append(formattedFields, fmt.Sprintf("field%d: %s", i+1, field))
+	}
+
+	return "(" + strings.Join(formattedFields, ", ") + ")"
+}
+
+// parseCompositeFields разбирает поля составного типа
+func parseCompositeFields(compositeStr string) []string {
+	var fields []string
+	var currentField strings.Builder
+	inQuotes := false
+	escapeNext := false
+
+	for _, char := range compositeStr {
+		switch {
+		case escapeNext:
+			currentField.WriteRune(char)
+			escapeNext = false
+		case char == '\\':
+			escapeNext = true
+		case char == '"':
+			inQuotes = !inQuotes
+			currentField.WriteRune(char)
+		case char == ',' && !inQuotes:
+			fields = append(fields, currentField.String())
+			currentField.Reset()
+		default:
+			currentField.WriteRune(char)
+		}
+	}
+
+	// Добавляем последнее поле
+	if currentField.Len() > 0 {
+		fields = append(fields, currentField.String())
+	}
+
+	return fields
+}
+
 // NewDataDisplayWindow создает новое окно отображения данных
 func NewDataDisplayWindow(mw *MainWindow) *DataDisplayWindow {
 	logger.Info("Создание нового окна данных. Полученное главное окно: %p", mw)
@@ -372,8 +504,6 @@ func (d *DataDisplayWindow) refreshData() {
 	dialog.ShowInformation("Обновлено", "Данные успешно обновлены", d.window)
 }
 
-// ОСТАВШИЕСЯ СУЩЕСТВУЮЩИЕ МЕТОДЫ (без изменений)
-
 func (d *DataDisplayWindow) loadTableList(tableSelect *widget.Select) {
 	tables, err := d.mainWindow.rep.GetTableNames(context.Background())
 	if err != nil {
@@ -515,58 +645,6 @@ func (d *DataDisplayWindow) updateTable(filter models.ExperimentFilter) {
 	d.createDynamicTable(result)
 }
 
-// convertValueToString конвертирует любое значение в строку для отображения
-func convertValueToString(value interface{}) string {
-	if value == nil {
-		return ""
-	}
-
-	// Обработка pgtype.Numeric
-	if numeric, ok := value.(pgtype.Numeric); ok {
-		if !numeric.Valid {
-			return ""
-		}
-		// Преобразуем Numeric в float64 и форматируем
-		floatVal, err := numeric.Float64Value()
-		if err != nil {
-			return fmt.Sprintf("%v", numeric)
-		}
-		if !floatVal.Valid {
-			return ""
-		}
-		return fmt.Sprintf("%.2f", floatVal.Float64)
-	}
-
-	switch v := value.(type) {
-	case string:
-		return v
-	case int, int32, int64:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%.2f", v)
-	case bool:
-		if v {
-			return "Да"
-		}
-		return "Нет"
-	case []string:
-		return strings.Join(v, ", ")
-	case []byte:
-		return string(v)
-	case time.Time:
-		return v.Format("2006-01-02 15:04:05")
-	default:
-		// Для других типов пробуем преобразовать в строку
-		str := fmt.Sprintf("%v", v)
-		// Пытаемся распарсить как число, если похоже на числовое значение
-		if strings.Contains(str, "Numeric") || strings.Contains(str, "pgtype") {
-			// Это внутреннее представление pgtype, пропускаем
-			return ""
-		}
-		return str
-	}
-}
-
 // executeQueryWithParams выполняет параметризованный запрос
 func (d *DataDisplayWindow) executeQueryWithParams(ctx context.Context, query string, args ...interface{}) (*models.QueryResult, error) {
 	logger.Info("Выполнение параметризованного запроса: %s с параметрами: %v", query, args)
@@ -646,6 +724,7 @@ func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
 		func() fyne.CanvasObject {
 			label := widget.NewLabel("")
 			label.Alignment = fyne.TextAlignCenter
+			label.Wrapping = fyne.TextWrapWord // Разрешаем перенос слов
 			return label
 		},
 		func(i widget.TableCellID, o fyne.CanvasObject) {
@@ -657,17 +736,7 @@ func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
 				if i.Col < len(result.Columns) {
 					columnName := result.Columns[i.Col]
 					// Улучшаем отображение названий столбцов
-					if columnName == "user_percent" {
-						columnName = "Процент пользователей (%)"
-					} else if columnName == "algorithm_a" {
-						columnName = "Алгоритм A"
-					} else if columnName == "algorithm_b" {
-						columnName = "Алгоритм B"
-					} else if columnName == "is_active" {
-						columnName = "Активен"
-					} else if columnName == "start_date" {
-						columnName = "Дата начала"
-					}
+					columnName = d.formatColumnName(columnName)
 					label.SetText(columnName)
 					label.TextStyle = fyne.TextStyle{Bold: true}
 				}
@@ -700,7 +769,7 @@ func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
 		case "name":
 			table.SetColumnWidth(i, 200)
 		case "user_percent":
-			table.SetColumnWidth(i, 250) // Шире для нового названия
+			table.SetColumnWidth(i, 250)
 		case "is_active":
 			table.SetColumnWidth(i, 100)
 		case "start_date":
@@ -708,7 +777,12 @@ func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
 		case "tags":
 			table.SetColumnWidth(i, 200)
 		default:
-			table.SetColumnWidth(i, 120)
+			// Для составных типов делаем столбцы шире
+			if strings.Contains(colName, "_composite") || strings.HasSuffix(colName, "_type") {
+				table.SetColumnWidth(i, 300)
+			} else {
+				table.SetColumnWidth(i, 120)
+			}
 		}
 	}
 
@@ -717,6 +791,39 @@ func (d *DataDisplayWindow) createDynamicTable(result *models.QueryResult) {
 	d.tableContainer.Refresh()
 
 	logger.Info("Таблица %s обновлена: %d строк, %d столбцов", d.tableName, len(data), len(result.Columns))
+}
+
+// formatColumnName форматирует имя столбца для лучшего отображения
+func (d *DataDisplayWindow) formatColumnName(columnName string) string {
+	// Создаем карту для преобразования технических имен в читаемые
+	nameMap := map[string]string{
+		"user_percent": "Процент пользователей (%)",
+		"algorithm_a":  "Алгоритм A",
+		"algorithm_b":  "Алгоритм B",
+		"is_active":    "Активен",
+		"start_date":   "Дата начала",
+		"end_date":     "Дата окончания",
+		"created_at":   "Создано",
+		"updated_at":   "Обновлено",
+		"description":  "Описание",
+		"status":       "Статус",
+		"type":         "Тип",
+		"name":         "Название",
+		"id":           "ID",
+	}
+
+	// Проверяем, есть ли столбец в карте
+	if prettyName, exists := nameMap[columnName]; exists {
+		return prettyName
+	}
+
+	// Для составных типов добавляем пометку
+	if strings.Contains(columnName, "_composite") || strings.HasSuffix(columnName, "_type") {
+		return fmt.Sprintf("%s (составной тип)", strings.ReplaceAll(columnName, "_", " "))
+	}
+
+	// По умолчанию заменяем подчеркивания на пробелы и капитализируем
+	return strings.ReplaceAll(columnName, "_", " ")
 }
 
 func (d *DataDisplayWindow) Show() {

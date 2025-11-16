@@ -67,33 +67,83 @@ func (c *CustomTypesWindow) buildUI() {
 	}, c.onTypeSelected)
 	c.typeSelect.PlaceHolder = "Тип данных"
 
-	// Список существующих типов
+	// Улучшенный список существующих типов
 	c.typeList = widget.NewList(
 		func() int {
 			return len(c.customTypes)
 		},
 		func() fyne.CanvasObject {
-			return container.NewHBox(
-				widget.NewLabel("Тип:"),
-				widget.NewLabel("Имя:"),
-				widget.NewLabel("Значения:"),
+			return container.NewVBox(
+				container.NewHBox(
+					widget.NewLabel("Тип:"),
+					widget.NewLabel(""),
+					widget.NewLabel("Имя:"),
+					widget.NewLabel(""),
+				),
+				widget.NewLabel(""), // для значений/полей
 			)
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			cont := o.(*fyne.Container)
-			labels := cont.Objects
-			t := c.customTypes[i]
-			labels[0].(*widget.Label).SetText(string(t.Type))
-			labels[1].(*widget.Label).SetText(t.Name)
+			header := cont.Objects[0].(*fyne.Container)
+			valueLabel := cont.Objects[1].(*widget.Label)
 
+			t := c.customTypes[i]
+
+			// Заголовок
+			labels := header.Objects
+			labels[1].(*widget.Label).SetText(string(t.Type))
+			labels[3].(*widget.Label).SetText(t.Name)
+
+			// Значения
 			if t.Type == models.EnumType {
-				labels[2].(*widget.Label).SetText(strings.Join(t.EnumValues, ", "))
+				valueLabel.SetText("Значения: " + strings.Join(t.EnumValues, ", "))
 			} else {
 				var fields []string
 				for _, f := range t.CompositeFields {
-					fields = append(fields, fmt.Sprintf("%s:%s", f.Name, f.DataType))
+					fields = append(fields, fmt.Sprintf("%s: %s", f.Name, f.DataType))
 				}
-				labels[2].(*widget.Label).SetText(strings.Join(fields, ", "))
+				valueLabel.SetText("Поля: " + strings.Join(fields, ", "))
+			}
+		},
+	)
+
+	c.typeList = widget.NewList(
+		func() int {
+			return len(c.customTypes)
+		},
+		func() fyne.CanvasObject {
+			return container.NewVBox(
+				container.NewHBox(
+					widget.NewLabel("Тип:"),
+					widget.NewLabel(""),
+					widget.NewLabel("Имя:"),
+					widget.NewLabel(""),
+				),
+				widget.NewLabel(""), // для значений/полей
+			)
+		},
+		func(i widget.ListItemID, o fyne.CanvasObject) {
+			cont := o.(*fyne.Container)
+			header := cont.Objects[0].(*fyne.Container)
+			valueLabel := cont.Objects[1].(*widget.Label)
+
+			t := c.customTypes[i]
+
+			// Заголовок
+			labels := header.Objects
+			labels[1].(*widget.Label).SetText(string(t.Type))
+			labels[3].(*widget.Label).SetText(t.Name)
+
+			// Значения
+			if t.Type == models.EnumType {
+				valueLabel.SetText("Значения: " + strings.Join(t.EnumValues, ", "))
+			} else {
+				var fields []string
+				for _, f := range t.CompositeFields { // Теперь это TypeField
+					fields = append(fields, fmt.Sprintf("%s: %s", f.Name, f.DataType))
+				}
+				valueLabel.SetText("Поля: " + strings.Join(fields, ", "))
 			}
 		},
 	)
@@ -101,6 +151,10 @@ func (c *CustomTypesWindow) buildUI() {
 	// Обработчик выбора элемента в списке
 	c.typeList.OnSelected = func(id widget.ListItemID) {
 		c.selectedID = id
+		if id >= 0 && id < len(c.customTypes) {
+			selectedType := c.customTypes[id]
+			c.resultLabel.SetText(fmt.Sprintf("Выбран тип: %s (%s)", selectedType.Name, selectedType.Type))
+		}
 	}
 
 	// Кнопки
@@ -132,6 +186,11 @@ func (c *CustomTypesWindow) buildUI() {
 
 	// Устанавливаем значение по умолчанию ПОСЛЕ того как все инициализировано
 	c.typeSelect.SetSelected(string(models.EnumType))
+
+	// Обработчик закрытия окна
+	c.window.SetOnClosed(func() {
+		c.window = nil
+	})
 }
 
 func (c *CustomTypesWindow) onTypeSelected(selected string) {
@@ -144,9 +203,11 @@ func (c *CustomTypesWindow) onTypeSelected(selected string) {
 	case models.EnumType:
 		c.enumValues.Show()
 		c.compositeFields.Hide()
+		c.resultLabel.SetText("Создание ENUM типа - укажите значения через запятую")
 	case models.CompositeType:
 		c.enumValues.Hide()
 		c.compositeFields.Show()
+		c.resultLabel.SetText("Создание составного типа - укажите поля в формате имя:тип")
 	default:
 		c.enumValues.Hide()
 		c.compositeFields.Hide()
@@ -157,6 +218,12 @@ func (c *CustomTypesWindow) createType() {
 	typeName := strings.TrimSpace(c.typeName.Text)
 	if typeName == "" {
 		c.resultLabel.SetText("❌ Ошибка: имя типа не может быть пустым")
+		return
+	}
+
+	// Валидация имени типа
+	if !isValidTypeName(typeName) {
+		c.resultLabel.SetText("❌ Ошибка: имя типа может содержать только буквы, цифры и подчеркивания")
 		return
 	}
 
@@ -176,8 +243,15 @@ func (c *CustomTypesWindow) createType() {
 		for _, v := range values {
 			trimmed := strings.TrimSpace(v)
 			if trimmed != "" {
+				// Экранирование одинарных кавычек
+				trimmed = strings.ReplaceAll(trimmed, "'", "''")
 				formattedValues = append(formattedValues, "'"+trimmed+"'")
 			}
+		}
+
+		if len(formattedValues) == 0 {
+			c.resultLabel.SetText("❌ Ошибка: укажите хотя бы одно значение ENUM")
+			return
 		}
 
 		query = fmt.Sprintf("CREATE TYPE %s AS ENUM (%s)", typeName, strings.Join(formattedValues, ", "))
@@ -198,6 +272,13 @@ func (c *CustomTypesWindow) createType() {
 			}
 			fieldName := strings.TrimSpace(parts[0])
 			fieldType := strings.TrimSpace(parts[1])
+
+			// Валидация имени поля
+			if !isValidTypeName(fieldName) {
+				c.resultLabel.SetText(fmt.Sprintf("❌ Ошибка: некорректное имя поля '%s'", fieldName))
+				return
+			}
+
 			fieldDefinitions = append(fieldDefinitions, fmt.Sprintf("%s %s", fieldName, fieldType))
 		}
 
@@ -250,11 +331,23 @@ func (c *CustomTypesWindow) useInTable() {
 		return
 	}
 
-	// Открываем окно ALTER TABLE
+	selectedType := c.customTypes[c.selectedID]
+
+	// Открываем окно ALTER TABLE и передаем выбранный тип
 	alterWin := NewAlterTableWindow(c.repository, c.window, func() {})
+
+	// Передаем выбранный пользовательский тип
+	alterWin.SetCustomType(selectedType.Name)
 	alterWin.Show()
 
-	c.window.Close()
+	// Скрываем текущее окно вместо закрытия
+	c.window.Hide()
+
+	// Устанавливаем обработчик, чтобы показать окно снова при закрытии AlterTableWindow
+	alterWin.window.SetOnClosed(func() {
+		c.window.Show()
+		c.loadCustomTypes() // Обновляем список на случай изменений
+	})
 }
 
 func (c *CustomTypesWindow) loadCustomTypes() {
@@ -262,14 +355,14 @@ func (c *CustomTypesWindow) loadCustomTypes() {
 
 	// Загружаем ENUM типы
 	enumQuery := `
-		SELECT t.typname as type_name, 
-		       array_agg(e.enumlabel ORDER BY e.enumsortorder) as enum_values
-		FROM pg_type t 
-		JOIN pg_enum e ON t.oid = e.enumtypid  
-		JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
-		WHERE n.nspname = 'public'
-		GROUP BY t.typname
-	`
+        SELECT t.typname as type_name, 
+               array_agg(e.enumlabel ORDER BY e.enumsortorder) as enum_values
+        FROM pg_type t 
+        JOIN pg_enum e ON t.oid = e.enumtypid  
+        JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+        WHERE n.nspname = 'public'
+        GROUP BY t.typname
+    `
 
 	enumResult, err := c.repository.ExecuteQuery(ctx, enumQuery)
 	if err != nil {
@@ -290,14 +383,60 @@ func (c *CustomTypesWindow) loadCustomTypes() {
 			if valuesStr, ok := row["enum_values"].(string); ok {
 				// Убираем фигурные скобки и разбиваем по запятым
 				valuesStr = strings.Trim(valuesStr, "{}")
-				enumType.EnumValues = strings.Split(valuesStr, ",")
+				if valuesStr != "" {
+					enumType.EnumValues = strings.Split(valuesStr, ",")
+				} else {
+					enumType.EnumValues = []string{}
+				}
 			}
 
 			c.customTypes = append(c.customTypes, enumType)
 		}
 	}
 
-	// Загружаем составные типы (можно расширить при необходимости)
+	// ЗАГРУЗКА СОСТАВНЫХ ТИПОВ
+	compQuery := `
+        SELECT t.typname as type_name,
+               a.attname as field_name,
+               pg_catalog.format_type(a.atttypid, a.atttypmod) as field_type
+        FROM pg_type t
+        JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+        JOIN pg_catalog.pg_class c ON c.oid = t.typrelid
+        JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+        WHERE n.nspname = 'public' 
+          AND t.typtype = 'c'
+          AND a.attnum > 0 
+          AND NOT a.attisdropped
+        ORDER BY t.typname, a.attnum
+    `
+
+	compResult, err := c.repository.ExecuteQuery(ctx, compQuery)
+	if err != nil {
+		logger.Error("Ошибка загрузки составных типов: %v", err)
+	} else {
+		// Группируем поля по имени типа - ИСПРАВЛЕНО: используем TypeField вместо CompositeField
+		typeFields := make(map[string][]models.TypeField)
+		for _, row := range compResult.Rows {
+			typeName := row["type_name"].(string)
+			fieldName := row["field_name"].(string)
+			fieldType := row["field_type"].(string)
+
+			typeFields[typeName] = append(typeFields[typeName], models.TypeField{
+				Name:     fieldName,
+				DataType: fieldType,
+			})
+		}
+
+		// Создаем CustomType для каждого составного типа
+		for typeName, fields := range typeFields {
+			c.customTypes = append(c.customTypes, models.CustomType{
+				Name:            typeName,
+				Type:            models.CompositeType,
+				CompositeFields: fields, // Теперь типы совпадают
+			})
+		}
+	}
+
 	c.typeList.Refresh()
 	c.resultLabel.SetText(fmt.Sprintf("Загружено типов: %d", len(c.customTypes)))
 }
@@ -310,4 +449,21 @@ func (c *CustomTypesWindow) clearForm() {
 
 func (c *CustomTypesWindow) Show() {
 	c.window.Show()
+}
+
+// Вспомогательная функция для валидации имен типов и полей
+func isValidTypeName(name string) bool {
+	if name == "" {
+		return false
+	}
+	// Проверяем, что имя содержит только буквы, цифры и подчеркивания
+	for _, char := range name {
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_') {
+			return false
+		}
+	}
+	return true
 }

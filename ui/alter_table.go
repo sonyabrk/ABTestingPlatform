@@ -43,7 +43,9 @@ type AlterTableWindow struct {
 	nullableCheckContainer   *fyne.Container
 	referenceContainer       *fyne.Container
 
-	currentTable string
+	currentTable      string
+	standardDataTypes []string
+	customTypeNames   map[string]bool // Для отслеживания пользовательских типов
 }
 
 func NewAlterTableWindow(repo *db.Repository, mainWindow fyne.Window, onTableChanged func()) *AlterTableWindow {
@@ -52,10 +54,16 @@ func NewAlterTableWindow(repo *db.Repository, mainWindow fyne.Window, onTableCha
 		mainWindow:     mainWindow,
 		onTableChanged: onTableChanged,
 		window:         fyne.CurrentApp().NewWindow("ALTER TABLE - Изменение структуры таблиц"),
+		standardDataTypes: []string{
+			"INTEGER", "SERIAL", "BIGINT", "VARCHAR(255)", "TEXT", "BOOLEAN",
+			"DATE", "TIMESTAMP", "NUMERIC(10,2)", "JSONB",
+		},
+		customTypeNames: make(map[string]bool),
 	}
 
 	a.buildUI()
 	a.loadTables()
+	a.loadCustomTypes()
 	return a
 }
 
@@ -83,10 +91,8 @@ func (a *AlterTableWindow) buildUI() {
 	a.newColumnName = widget.NewEntry()
 	a.newColumnName.SetPlaceHolder("Новое имя")
 
-	a.dataType = widget.NewSelect([]string{
-		"INTEGER", "SERIAL", "BIGINT", "VARCHAR(255)", "TEXT", "BOOLEAN",
-		"DATE", "TIMESTAMP", "NUMERIC(10,2)", "JSONB",
-	}, nil)
+	// Инициализируем dataType с базовыми типами
+	a.dataType = widget.NewSelect(a.standardDataTypes, nil)
 	a.dataType.PlaceHolder = "Тип данных"
 
 	a.constraintType = widget.NewSelect([]string{
@@ -195,6 +201,140 @@ func (a *AlterTableWindow) hideAllContainers() {
 	a.referenceContainer.Hide()
 }
 
+// Улучшенный метод для загрузки пользовательских типов
+func (a *AlterTableWindow) loadCustomTypes() {
+	ctx := context.Background()
+
+	// Загружаем все пользовательские типы (ENUM и составные) одним запросом
+	query := `
+		SELECT 
+			t.typname as type_name,
+			t.typtype as type_category
+		FROM pg_type t
+		JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+		WHERE n.nspname = 'public'
+			AND (t.typtype = 'e' OR t.typtype = 'c')  -- 'e' = ENUM, 'c' = COMPOSITE
+			AND t.typname NOT LIKE '\\_%'  -- Исключаем системные типы
+		ORDER BY t.typname
+	`
+
+	result, err := a.repository.ExecuteQuery(ctx, query)
+	if err != nil {
+		logger.Error("Ошибка загрузки пользовательских типов: %v", err)
+		a.resultLabel.SetText("❌ Ошибка загрузки пользовательских типов: " + err.Error())
+		return
+	}
+
+	// Очищаем карту пользовательских типов
+	a.customTypeNames = make(map[string]bool)
+
+	// Собираем все доступные типы данных
+	allTypes := make([]string, 0)
+
+	// Добавляем стандартные типы
+	allTypes = append(allTypes, a.standardDataTypes...)
+
+	// Добавляем пользовательские типы из результата запроса
+	customTypesCount := 0
+	for _, row := range result.Rows {
+		if typeName, ok := row["type_name"].(string); ok {
+			if typeCategory, ok := row["type_category"].(string); ok {
+				// Добавляем тип в список
+				allTypes = append(allTypes, typeName)
+				a.customTypeNames[typeName] = true
+				customTypesCount++
+
+				logger.Info("Загружен пользовательский тип: %s (%s)", typeName, typeCategory)
+			}
+		}
+	}
+
+	// Обновляем список типов данных
+	a.dataType.Options = allTypes
+	a.dataType.Refresh()
+
+	logger.Info("Загружено пользовательских типов: %d", customTypesCount)
+}
+
+// Метод для добавления пользовательского типа в селектор
+func (a *AlterTableWindow) addCustomTypeToSelector(typeName string) {
+	// Проверяем, нет ли уже этого типа в списке
+	for _, option := range a.dataType.Options {
+		if option == typeName {
+			return // Уже есть
+		}
+	}
+
+	// Добавляем пользовательский тип в список
+	newOptions := append(a.dataType.Options, typeName)
+	a.dataType.Options = newOptions
+	a.dataType.Refresh()
+
+	// Добавляем в карту пользовательских типов
+	a.customTypeNames[typeName] = true
+}
+
+// SetCustomType устанавливает пользовательский тип для использования в ALTER TABLE
+func (a *AlterTableWindow) SetCustomType(typeName string) {
+	// Сначала проверяем, есть ли тип в текущем списке
+	found := false
+	for _, option := range a.dataType.Options {
+		if option == typeName {
+			found = true
+			break
+		}
+	}
+
+	// Если типа нет в списке, добавляем его
+	if !found {
+		a.addCustomTypeToSelector(typeName)
+	}
+
+	// Устанавливаем выбранным пользовательский тип
+	a.dataType.SetSelected(typeName)
+
+	// Показываем информационное сообщение
+	a.resultLabel.SetText(fmt.Sprintf("✅ Выбран пользовательский тип: %s\nТеперь вы можете использовать его при добавлении столбца.", typeName))
+}
+
+// Проверка, является ли тип пользовательским
+func (a *AlterTableWindow) isCustomType(typeName string) bool {
+	// Проверяем стандартные типы
+	for _, stdType := range a.standardDataTypes {
+		if stdType == typeName {
+			return false
+		}
+	}
+
+	// Проверяем пользовательские типы
+	return a.customTypeNames[typeName]
+}
+
+// Валидация использования пользовательского типа - ИСПРАВЛЕННАЯ ВЕРСИЯ
+func (a *AlterTableWindow) validateCustomTypeUsage(typeName string) error {
+	if a.isCustomType(typeName) {
+		// Проверяем существование пользовательского типа в БД
+		ctx := context.Background()
+
+		// Форматируем запрос с параметром вместо использования плейсхолдера
+		checkQuery := fmt.Sprintf(`
+			SELECT 1 FROM pg_type t
+			JOIN pg_namespace n ON n.oid = t.typnamespace
+			WHERE n.nspname = 'public' AND t.typname = '%s'
+		`, typeName)
+
+		result, err := a.repository.ExecuteQuery(ctx, checkQuery)
+		if err != nil {
+			return fmt.Errorf("ошибка проверки типа %s: %v", typeName, err)
+		}
+
+		if len(result.Rows) == 0 {
+			return fmt.Errorf("пользовательский тип %s не существует в базе данных", typeName)
+		}
+	}
+	return nil
+}
+
 func (a *AlterTableWindow) onActionSelected(action string) {
 	// Скрываем все поля сначала
 	a.hideAllContainers()
@@ -247,28 +387,6 @@ func (a *AlterTableWindow) onActionSelected(action string) {
 		a.newColumnName.SetPlaceHolder("Новое имя таблицы")
 		a.resultLabel.SetText("Введите новое имя таблицы")
 	}
-}
-
-// SetCustomType устанавливает пользовательский тип для использования в ALTER TABLE
-func (a *AlterTableWindow) SetCustomType(typeName string) {
-	// Обновляем список типов данных, добавляя пользовательский тип
-	currentOptions := a.dataType.Options
-	customTypeOption := fmt.Sprintf("%s (пользовательский)", typeName)
-
-	// Проверяем, нет ли уже этого типа в списке
-	for _, option := range currentOptions {
-		if option == customTypeOption {
-			return // Уже есть
-		}
-	}
-
-	// Добавляем пользовательский тип в список
-	newOptions := append(currentOptions, customTypeOption)
-	a.dataType.Options = newOptions
-	a.dataType.Refresh()
-
-	// Устанавливаем выбранным пользовательский тип
-	a.dataType.SetSelected(customTypeOption)
 }
 
 func (a *AlterTableWindow) executeQuery(query string) {
@@ -353,7 +471,7 @@ func (a *AlterTableWindow) executeQuery(query string) {
 	}
 }
 
-// НОВЫЙ метод для изменения типа данных через удаление и создание столбца
+// Метод для изменения типа данных через удаление и создание столбца
 func (a *AlterTableWindow) changeDataType() {
 	columnName := strings.TrimSpace(a.columnName.Text)
 	newDataType := a.dataType.Selected
@@ -364,6 +482,12 @@ func (a *AlterTableWindow) changeDataType() {
 	}
 	if newDataType == "" {
 		a.showError(fmt.Errorf("не выбран тип данных"))
+		return
+	}
+
+	// Валидация пользовательского типа
+	if err := a.validateCustomTypeUsage(newDataType); err != nil {
+		a.showError(err)
 		return
 	}
 
@@ -481,7 +605,8 @@ func (a *AlterTableWindow) onTableSelected(table string) {
 
 func (a *AlterTableWindow) refreshData() {
 	a.loadTables()
-	a.resultLabel.SetText("Данные обновлены")
+	a.loadCustomTypes() // Обновляем и пользовательские типы
+	a.resultLabel.SetText("✅ Данные обновлены (таблицы и пользовательские типы)")
 
 	// Вызываем callback для обновления главного окна
 	if a.onTableChanged != nil {
@@ -594,6 +719,11 @@ func (a *AlterTableWindow) buildAlterQuery() (string, error) {
 
 	switch action {
 	case "Добавить столбец":
+		// Валидация пользовательского типа
+		if err := a.validateCustomTypeUsage(a.dataType.Selected); err != nil {
+			return "", err
+		}
+
 		query = fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s",
 			a.currentTable, a.columnName.Text, a.dataType.Selected)
 

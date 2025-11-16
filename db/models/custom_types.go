@@ -16,6 +16,11 @@ type CustomType struct {
 	CompositeFields []TypeField    `json:"composite_fields,omitempty"`
 }
 
+type CompositeField struct {
+	Name     string `json:"name"`
+	DataType string `json:"data_type"`
+}
+
 // TypeField представляет поле составного типа
 type TypeField struct {
 	Name     string `json:"name"`
